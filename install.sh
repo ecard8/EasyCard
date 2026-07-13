@@ -92,6 +92,11 @@ asset_url() {
 
 confirm() {
   if [[ "$ASSUME_YES" -eq 1 ]]; then return 0; fi
+  # curl|bash 时 stdin 不是终端：避免 read 吃到 EOF 静默失败
+  if [[ ! -t 0 ]]; then
+    warn "非交互安装（stdin 非终端），自动继续。显式确认请加 -y 或先下载再执行。"
+    return 0
+  fi
   local ans
   read -r -p "确认继续安装到 ${INSTALL_DIR} 并监听 :${PORT} ? [y/N] " ans
   [[ "$ans" == "y" || "$ans" == "Y" ]] || die "已取消"
@@ -136,17 +141,33 @@ EOF
   systemctl daemon-reload
 }
 
+rand_hex() {
+  local n="${1:-32}"
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex "$n"
+  else
+    head -c "$n" /dev/urandom | od -An -tx1 | tr -d ' \n'
+  fi
+}
+
 write_default_config() {
   local cfg="${INSTALL_DIR}/config.json"
   if [[ -f "$cfg" ]]; then
     info "保留已有配置: $cfg"
     return 0
   fi
+  local aes sess
+  aes="$(rand_hex 32)"
+  sess="$(rand_hex 32)"
+  [[ ${#aes} -eq 64 ]] || die "生成 aes_key 失败"
+  [[ ${#sess} -eq 64 ]] || die "生成 session_secret 失败"
   cat >"$cfg" <<EOF
 {
   "listen": ":${PORT}",
   "db_path": "data/data.db",
-  "base_url": "http://127.0.0.1:${PORT}"
+  "base_url": "http://127.0.0.1:${PORT}",
+  "aes_key": "${aes}",
+  "session_secret": "${sess}"
 }
 EOF
   chown easycard:easycard "$cfg"
