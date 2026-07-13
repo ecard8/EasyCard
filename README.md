@@ -21,17 +21,18 @@
 
 ## Linux 一键安装（推荐）
 
-需要: `curl`、`tar`、root 权限；支持 **amd64 / arm64**。
+需要: `curl` 或 `wget`、`tar`、**root**；支持 **amd64 / arm64**。
+
+推荐写法（与宝塔面板类似：先下载到本地再执行，避免 `curl|bash` 管道问题）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ecard8/EasyCard/main/install.sh | sudo bash
+if [ -f /usr/bin/curl ];then curl -sSO https://raw.githubusercontent.com/ecard8/EasyCard/main/install.sh;else wget -O install.sh https://raw.githubusercontent.com/ecard8/EasyCard/main/install.sh;fi;bash install.sh -y
 ```
 
 指定版本 / 目录 / 端口:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ecard8/EasyCard/main/install.sh -o install.sh
-sudo bash install.sh --version 1.0.0 --dir /opt/easycard --port 8080
+bash install.sh --version 1.0.0 --dir /opt/easycard --port 8080 -y
 ```
 
 安装脚本会:
