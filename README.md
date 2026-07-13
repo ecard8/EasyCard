@@ -129,10 +129,10 @@ cd /opt/easycard
 
 ### Nginx
 
-在已有 `server { ... }` 中加入：
+整站反代（独立站点推荐）：
 
 ```nginx
-location / {
+location ^~ / {
     proxy_pass http://127.0.0.1:8080;
     proxy_set_header Host              $host;
     proxy_set_header X-Real-IP         $remote_addr;
@@ -141,6 +141,37 @@ location / {
 }
 ```
 
+**务必使用 `^~`**，否则宝塔默认的 `location ~* \.(js|css)$` 会优先匹配管理端 `/admin/assets/*.js|css`，在网站根目录找文件失败 → **404 白屏**（页面 HTML 能开、favicon 正常，但 JS/CSS 挂）。
+
+若必须保留站点其它静态缓存规则，至少保证下列前缀走反代：
+
+```nginx
+location ^~ /admin/ {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+location ^~ /api/ {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+location ^~ /static/ {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+改完后：`nginx -t && nginx -s reload`，浏览器强制刷新（Ctrl+F5）。
+
+自检：直接打开 `http://服务器IP:8080/admin` 若正常、走域名却白屏，就是 Nginx 未把 `/admin/assets/` 转到后端。
 ### Apache
 
 在已有 VirtualHost 中加入：
