@@ -1,0 +1,5 @@
+﻿# Public docs-only repo — no application source
+* 
+!.gitignore
+!README.md
+!install.sh
