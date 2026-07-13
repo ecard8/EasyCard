@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # EasyCard (易发卡) Linux 一键安装脚本
-# 用法:
-#   curl -fsSL https://raw.githubusercontent.com/ecard8/EasyCard/main/install.sh | sudo bash
-#   或: sudo bash install.sh [版本号，如 1.0.0]
-#        sudo bash install.sh --dir /opt/easycard --port 8080 --version 1.0.0
+#
+# 推荐（宝塔同款：先落到本地再执行，避免 curl|bash 吞掉 stdin）:
+#   if [ -f /usr/bin/curl ];then curl -sSO https://raw.githubusercontent.com/ecard8/EasyCard/main/install.sh;else wget -O install.sh https://raw.githubusercontent.com/ecard8/EasyCard/main/install.sh;fi;bash install.sh -y
+#
+# 其它:
+#   sudo bash install.sh 1.0.0
+#   sudo bash install.sh --dir /opt/easycard --port 8080 --version 1.0.0
 set -euo pipefail
 
 REPO="ecard8/EasyCard"
@@ -75,10 +78,34 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "缺少命令: $1"
 }
 
+# 下载到文件：优先 curl，否则 wget（与宝塔一键装同思路）
+http_get() {
+  local url="$1" out="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fL --retry 3 -o "$out" "$url"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -O "$out" "$url"
+  else
+    die "缺少 curl 或 wget"
+  fi
+}
+
+# 输出到 stdout（用于 API JSON）
+http_get_stdout() {
+  local url="$1"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --retry 3 "$url"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO- "$url"
+  else
+    die "缺少 curl 或 wget"
+  fi
+}
+
 api_latest_tag() {
   # 返回不含 v 前缀的版本号
   local tag
-  tag="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+  tag="$(http_get_stdout "https://api.github.com/repos/${REPO}/releases/latest" \
     | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
   [[ -n "$tag" ]] || die "无法获取最新 Release，请检查网络或仓库 ${REPO}"
   echo "${tag#v}"
@@ -103,9 +130,11 @@ confirm() {
 }
 
 install_deps_hint() {
-  need_cmd curl
+  if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+    die "缺少 curl 或 wget"
+  fi
   need_cmd tar
-  need_cmd sha256sum || warn "未找到 sha256sum，将跳过校验"
+  command -v sha256sum >/dev/null 2>&1 || warn "未找到 sha256sum，将跳过校验"
 }
 
 create_user() {
@@ -181,14 +210,14 @@ download_and_extract() {
   tmp="$(mktemp -d)"
   archive="${tmp}/${PRODUCT}-${ver}-linux-${arch}.tar.gz"
   info "下载: $url"
-  curl -fL --retry 3 -o "$archive" "$url" || die "下载失败"
+  http_get "$url" "$archive" || die "下载失败"
 
   # 可选校验
   if command -v sha256sum >/dev/null 2>&1; then
     local sums_url sums
     sums_url="https://github.com/${REPO}/releases/download/v${ver}/SHA256SUMS"
     sums="${tmp}/SHA256SUMS"
-    if curl -fsSL -o "$sums" "$sums_url"; then
+    if http_get "$sums_url" "$sums" 2>/dev/null; then
       (cd "$tmp" && sha256sum -c SHA256SUMS --ignore-missing) || die "SHA256 校验失败"
       info "SHA256 校验通过"
     else
