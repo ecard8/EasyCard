@@ -102,7 +102,151 @@ cd /opt/easycard
 }
 ```
 
-反向代理时请正确设置 `base_url`（含 `https://`），并配置 `trusted_proxies`（如有）。
+反向代理时请正确设置 `base_url`（含 `https://`），并配置 `trusted_proxies`（见下一节）。
+
+---
+
+## 反向代理（Nginx / Apache）
+
+生产环境建议：本机只监听 `127.0.0.1:8080`，由 Nginx / Apache 对外提供 **HTTPS**，再转发到 EasyCard。
+
+### 1. 调整 `config.json`
+
+```json
+{
+  "listen": "127.0.0.1:8080",
+  "db_path": "data/data.db",
+  "base_url": "https://shop.example.com",
+  "trusted_proxies": ["127.0.0.1", "::1"]
+}
+```
+
+| 字段 | 作用 |
+|------|------|
+| `listen` | 仅本机访问时写 `127.0.0.1:8080`，避免绕过反代直连 |
+| `base_url` | **对外完整地址**（支付回调等依赖它），须与浏览器域名一致，含 `https://`，末尾不要斜杠 |
+| `trusted_proxies` | 可信反代 IP/CIDR。填写后才信任 `X-Forwarded-*`；同机反代填 `127.0.0.1` 即可 |
+
+修改后重启服务：
+
+```bash
+sudo systemctl restart easycard
+```
+
+### 2. Nginx 示例（HTTPS）
+
+域名以 `shop.example.com` 为例（证书路径按实际修改，也可用 Certbot）。
+
+```nginx
+# /etc/nginx/sites-available/easycard
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 80;
+    server_name shop.example.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name shop.example.com;
+
+    ssl_certificate     /etc/nginx/ssl/shop.example.com.fullchain.pem;
+    ssl_certificate_key /etc/nginx/ssl/shop.example.com.key;
+
+    client_max_body_size 32m;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host  $host;
+
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+}
+```
+
+启用并重载：
+
+```bash
+sudo ln -sf /etc/nginx/sites-available/easycard /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Certbot（Let's Encrypt）：
+
+```bash
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d shop.example.com
+```
+
+### 3. Apache 示例（HTTPS）
+
+需启用模块：`proxy`、`proxy_http`、`ssl`、`headers`、`rewrite`。
+
+```apache
+# /etc/apache2/sites-available/easycard.conf
+<VirtualHost *:80>
+    ServerName shop.example.com
+    RewriteEngine On
+    RewriteRule ^ https://%{SERVER_NAME}%{REQUEST_URI} [END,NE,R=permanent]
+</VirtualHost>
+
+<VirtualHost *:443>
+    ServerName shop.example.com
+
+    SSLEngine on
+    SSLCertificateFile      /etc/ssl/certs/shop.example.com.fullchain.pem
+    SSLCertificateKeyFile   /etc/ssl/private/shop.example.com.key
+
+    ProxyPreserveHost On
+    RequestHeader set X-Forwarded-Proto "https"
+    RequestHeader set X-Forwarded-Port "443"
+
+    ProxyPass        / http://127.0.0.1:8080/
+    ProxyPassReverse / http://127.0.0.1:8080/
+
+    # 卡密导入等上传
+    LimitRequestBody 33554432
+</VirtualHost>
+```
+
+启用站点：
+
+```bash
+sudo a2enmod proxy proxy_http ssl headers rewrite
+sudo a2ensite easycard
+sudo apache2ctl configtest && sudo systemctl reload apache2
+```
+
+Certbot：
+
+```bash
+sudo apt install -y certbot python3-certbot-apache
+sudo certbot --apache -d shop.example.com
+```
+
+### 4. 验证清单
+
+1. 打开 `https://shop.example.com/admin`，管理端可正常访问  
+2. `base_url` 必须为 `https://shop.example.com`（与证书域名一致）  
+3. 支付回调基于 `base_url` 生成；换域名后请检查支付渠道回调配置  
+4. 若客户端 IP 异常，检查 `trusted_proxies` 是否包含反代地址  
+
+**注意：** 暂不建议子路径部署（如 `https://example.com/shop/`），请使用独立域名或子域名，反代到根路径 `/`。
+
 
 ---
 
