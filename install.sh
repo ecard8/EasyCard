@@ -85,15 +85,9 @@ api_latest_tag() {
 }
 
 asset_url() {
-  local ver="$1" arch="$2" name url
+  local ver="$1" arch="$2" name
   name="${PRODUCT}-${ver}-linux-${arch}.tar.gz"
-  url="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/tags/v${ver}" \
-    | sed -n "s/.*\"browser_download_url\":[[:space:]]*\"\\([^\"]*${name}\\)\".*/\\1/p" | head -n1)"
-  if [[ -z "$url" ]]; then
-    # 兼容直接拼接（公开 Release 常见路径）
-    url="https://github.com/${REPO}/releases/download/v${ver}/${name}"
-  fi
-  echo "$url"
+  echo "https://github.com/${REPO}/releases/download/v${ver}/${name}"
 }
 
 confirm() {
