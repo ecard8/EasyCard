@@ -7,7 +7,7 @@
 # 其它:
 #   sudo bash install.sh
 #   sudo bash install.sh --dir /opt/easycard --port 18765
-#   sudo bash install.sh --version 1.1.0-rc.1  # 可选：固定版本
+#   sudo bash install.sh --version 1.1.0-rc.2  # 可选：固定版本
 set -euo pipefail
 
 REPO="ecard8/EasyCard"
@@ -52,7 +52,7 @@ EasyCard 易卡数字平台 Linux 安装脚本
 示例:
   sudo bash install.sh
   sudo bash install.sh --dir /opt/easycard --port 18765
-  sudo bash install.sh --version 1.1.0-rc.1
+  sudo bash install.sh --version 1.1.0-rc.2
 EOF
 }
 

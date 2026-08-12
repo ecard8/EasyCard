@@ -242,23 +242,21 @@ run_command() {
 
 menu() {
   [[ -t 0 ]] || { show_help; return; }
-  while true; do
-    printf '\n%sEasyCard 易卡数字平台%s\n' "$CYAN" "$NC"
-    printf '  1) 查看状态\n  2) 启动服务\n  3) 停止服务\n  4) 重启服务\n  5) 在线更新\n  6) 查看日志\n  7) 查看版本\n  8) 更换监听端口\n  0) 退出\n'
-    read -r -p "请选择 [0-8]: " choice
-    case "$choice" in
-      1) show_status || true ;;
-      2) start_service start ;;
-      3) stop_service stop ;;
-      4) restart_service restart ;;
-      5) update_service ;;
-      6) show_logs 100 ;;
-      7) show_version ;;
-      8) read -r -p "请输入新端口（1-65535）: " new_port; change_port "$new_port" ;;
-      0) return ;;
-      *) warn "无效选项" ;;
-    esac
-  done
+  printf '\n%sEasyCard 易卡数字平台%s\n' "$CYAN" "$NC"
+  printf '  1) 查看状态\n  2) 启动服务\n  3) 停止服务\n  4) 重启服务\n  5) 在线更新\n  6) 查看日志\n  7) 查看版本\n  8) 更换监听端口\n  0) 退出\n'
+  read -r -p "请选择 [0-8]: " choice
+  case "$choice" in
+    1) show_status || true ;;
+    2) start_service start ;;
+    3) stop_service stop ;;
+    4) restart_service restart ;;
+    5) update_service ;;
+    6) show_logs 100 ;;
+    7) show_version ;;
+    8) read -r -p "请输入新端口（1-65535）: " new_port; change_port "$new_port" ;;
+    0) return ;;
+    *) warn "无效选项" ;;
+  esac
 }
 
 validate_config
