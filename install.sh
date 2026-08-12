@@ -293,6 +293,17 @@ health_ready() {
   fi
 }
 
+health_live() {
+  local check_port url
+  check_port="$(service_port)"
+  url="http://127.0.0.1:${check_port}/health"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS --max-time 2 "$url" >/dev/null 2>&1
+  else
+    wget -q -T 2 -O /dev/null "$url" >/dev/null 2>&1
+  fi
+}
+
 service_port() {
   local check_port="$PORT" configured
   if [[ -f "${INSTALL_DIR}/config.json" ]]; then
@@ -320,6 +331,13 @@ setup_pending() {
 
 DEPLOYMENT_STATE=""
 deployment_healthy() {
+	# /health proves that the process can serve requests and ping its database.
+	# /health/ready also contains operational policy (for example backup age and
+	# external-channel health), so a pre-existing degraded state must not make a
+	# sound binary look like a failed start or prevent rollback recovery.
+	if ! health_live; then
+		return 1
+	fi
   if health_ready; then
     DEPLOYMENT_STATE="ready"
     return 0
@@ -328,7 +346,8 @@ deployment_healthy() {
     DEPLOYMENT_STATE="setup"
     return 0
   fi
-  return 1
+  DEPLOYMENT_STATE="live"
+  return 0
 }
 
 wait_deployment() {
@@ -362,6 +381,8 @@ install_candidate() {
   if wait_deployment; then
     if [[ "$DEPLOYMENT_STATE" == "setup" ]]; then
       info "服务进程与数据库检查通过，正在等待首次安装向导完成；安装完成后请再验证 /health/ready"
+    elif [[ "$DEPLOYMENT_STATE" == "live" ]]; then
+      warn "服务启动和数据库检查通过，但运营就绪检查尚未通过；更新已完成，请执行 easycard status 并在管理后台查看运行监控"
     else
       info "服务就绪检查通过: http://127.0.0.1:$(service_port)/health/ready"
     fi
@@ -442,4 +463,6 @@ ${GREEN}安装完成${NC}
 EOF
 }
 
-main "$@"
+if [[ "${EASYCARD_INSTALLER_LIBRARY:-0}" != "1" ]]; then
+  main "$@"
+fi
