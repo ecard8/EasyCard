@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# EasyHub Digital Commerce Platform Linux 一键安装脚本
+# EasyCard Digital Commerce Platform Linux 一键安装脚本
 #
 # 推荐（宝塔同款：先落到本地再执行，避免 curl|bash 吞掉 stdin）:
 #   if [ -f /usr/bin/curl ];then curl -sSO https://raw.githubusercontent.com/ecard8/EasyCard/main/install.sh;else wget -O install.sh https://raw.githubusercontent.com/ecard8/EasyCard/main/install.sh;fi;bash install.sh -y
@@ -35,7 +35,7 @@ need_root() {
 
 usage() {
   cat <<EOF
-EasyHub 易汇数字平台 Linux 安装脚本
+EasyCard 易卡数字平台 Linux 安装脚本
 
 用法:
   sudo bash install.sh [选项] [版本]
@@ -158,7 +158,7 @@ write_systemd() {
   fi
   cat >"/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
 [Unit]
-Description=EasyHub Digital Commerce Platform
+Description=EasyCard Digital Commerce Platform
 After=network.target
 Wants=network-online.target
 

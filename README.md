@@ -1,10 +1,10 @@
-# EasyHub 易汇数字平台安装与部署
+# EasyCard 易卡数字平台安装与部署
 
 发布候选部署后，请按发行包内的 `ACCEPTANCE.zh-CN.md`、`OPERATIONS.zh-CN.md` 和预检脚本执行首装、升级、回退、灾难恢复与计划启用渠道验收；在线摘要见 [官网安装文档](https://ecard8.com/docs/guide/install)。
 
 > 本仓库**仅提供发行包与安装说明**，不包含业务源代码。
 
-EasyHub 易汇数字平台是一套数字商品智能交易与自动交付平台，采用单文件部署（二进制名 `cardgo`）。
+EasyCard 易卡数字平台是一套数字商品智能交易与自动交付平台，采用单文件部署（二进制名 `cardgo`）。
 
 - 官网: [https://www.ecard8.com](https://www.ecard8.com)
 - 发行包: 本仓库 [Releases](https://github.com/ecard8/EasyCard/releases)
@@ -22,7 +22,7 @@ EasyHub 易汇数字平台是一套数字商品智能交易与自动交付平台
 
 归档内可执行文件名均为 **`cardgo`**（Windows 为 `cardgo.exe`）。
 
-`EasyCard-*` 归档名、`ecard8/EasyCard` 仓库路径、`easycard` 服务用户/目录是现有发行与升级链路的兼容标识，品牌升级阶段继续保留；产品展示名称统一为 EasyHub。
+`EasyCard-*` 归档名、`ecard8/EasyCard` 仓库路径、`easycard` 服务用户/目录是现有发行与升级链路的兼容标识，品牌升级阶段继续保留；产品展示名称统一为 EasyCard。
 
 ---
 
@@ -132,7 +132,7 @@ cd /opt/easycard
 
 ## 反向代理（Nginx / Apache）
 
-纯端口 `"18765"` 等价于旧格式 `":18765"`，监听所有接口；只有需要限制网卡时才写 `"127.0.0.1:18765"`。生产环境建议本机监听 `127.0.0.1:18765`，由 Nginx / Apache 对外提供 HTTPS 后转发到 EasyHub。
+纯端口 `"18765"` 等价于旧格式 `":18765"`，监听所有接口；只有需要限制网卡时才写 `"127.0.0.1:18765"`。生产环境建议本机监听 `127.0.0.1:18765`，由 Nginx / Apache 对外提供 HTTPS 后转发到 EasyCard。
 
 ### `config.json`
 
@@ -278,4 +278,4 @@ Get-FileHash .\EasyCard-1.1.0-rc.1-windows-amd64.zip -Algorithm SHA256
 
 ## License / 声明
 
-发行包版权归 EasyHub 易汇数字平台所有。未经授权请勿反编译、二次分发商业源码等价物。
+发行包版权归 EasyCard 易卡数字平台所有。未经授权请勿反编译、二次分发商业源码等价物。
