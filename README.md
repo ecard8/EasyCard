@@ -36,11 +36,13 @@ EasyHub 易汇数字平台是一套数字商品智能交易与自动交付平台
 if [ -f /usr/bin/curl ];then curl -sSO https://raw.githubusercontent.com/ecard8/EasyCard/main/install.sh;else wget -O install.sh https://raw.githubusercontent.com/ecard8/EasyCard/main/install.sh;fi;bash install.sh -y
 ```
 
-指定版本 / 目录 / 端口:
+默认自动安装最近公开发布的版本（包含预发布）；也可指定目录 / 端口:
 
 ```bash
-bash install.sh --version 1.1.0-rc.1 --dir /opt/easycard --port 18765 -y
+bash install.sh --dir /opt/easycard --port 18765 -y
 ```
+
+需要复现、回滚或受控验收时，可额外使用 `--version 1.1.0-rc.1` 固定版本。
 
 安装脚本会:
 
@@ -79,7 +81,7 @@ journalctl -u easycard -f
 
 ```bash
 sudo bash install.sh --version 1.0.1 -y
-# 或安装最新版
+# 或自动安装最近公开版本（包含预发布）
 sudo bash install.sh -y
 ```
 

@@ -5,8 +5,9 @@
 #   if [ -f /usr/bin/curl ];then curl -sSO https://raw.githubusercontent.com/ecard8/EasyCard/main/install.sh;else wget -O install.sh https://raw.githubusercontent.com/ecard8/EasyCard/main/install.sh;fi;bash install.sh -y
 #
 # 其它:
-#   sudo bash install.sh 1.0.0
-#   sudo bash install.sh --dir /opt/easycard --port 18765 --version 1.0.0
+#   sudo bash install.sh
+#   sudo bash install.sh --dir /opt/easycard --port 18765
+#   sudo bash install.sh --version 1.1.0-rc.1  # 可选：固定版本
 set -euo pipefail
 
 REPO="ecard8/EasyCard"
@@ -42,14 +43,14 @@ EasyHub 易汇数字平台 Linux 安装脚本
 选项:
   -d, --dir DIR       安装目录 (默认: /opt/easycard)
   -p, --port PORT     监听端口 (默认: 18765)
-  -v, --version VER   指定版本，如 1.0.0；省略则安装最新 Release
+  -v, --version VER   可选：固定版本；省略则安装最新公开 Release（包含预发布）
   -y, --yes           非交互确认
   -h, --help          显示帮助
 
 示例:
   sudo bash install.sh
-  sudo bash install.sh 1.0.0
-  sudo bash install.sh --dir /opt/easycard --port 18765 --version 1.0.0
+  sudo bash install.sh --dir /opt/easycard --port 18765
+  sudo bash install.sh --version 1.1.0-rc.1
 EOF
 }
 
@@ -106,11 +107,12 @@ http_get_stdout() {
 }
 
 api_latest_tag() {
-  # 返回不含 v 前缀的版本号
+  # GitHub /releases/latest 会排除 prerelease；发布列表第一条才是最近公开发布。
+  # per_page=1 同时避免下载不必要的完整发布历史。
   local tag
-  tag="$(http_get_stdout "https://api.github.com/repos/${REPO}/releases/latest" \
+  tag="$(http_get_stdout "https://api.github.com/repos/${REPO}/releases?per_page=1" \
     | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-  [[ -n "$tag" ]] || die "无法获取最新 Release，请检查网络或仓库 ${REPO}"
+  [[ -n "$tag" ]] || die "无法获取最新公开 Release，请检查网络或仓库 ${REPO}"
   echo "${tag#v}"
 }
 
