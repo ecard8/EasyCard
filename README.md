@@ -52,6 +52,7 @@ bash install.sh --dir /opt/easycard --port 18765 -y
 4. 创建最小权限系统用户 `easycard` 与加固后的 systemd 服务 `easycard`
 5. 生成默认 `config.json`（若不存在）并始终保留已有配置、数据库和上传文件
 6. 启动后轮询 `/health/ready`；30 秒内未就绪则自动恢复上一版本二进制
+7. 安装 `/usr/local/bin/easycard` 管理命令，统一管理服务、日志、更新和监听端口
 
 首次打开管理端完成安装向导:
 
@@ -72,18 +73,20 @@ http://服务器IP:18765/admin
 ### 常用运维命令
 
 ```bash
-systemctl status easycard
-systemctl restart easycard
-journalctl -u easycard -f
+easycard                         # 打开交互菜单
+sudo easycard status
+sudo easycard start
+sudo easycard stop
+sudo easycard restart
+sudo easycard update
+sudo easycard update 1.1.0-rc.1
+easycard port
+sudo easycard port 9090
+sudo easycard logs 200
+sudo easycard logs -f
 ```
 
-升级（保留数据与配置）:
-
-```bash
-sudo bash install.sh --version 1.0.1 -y
-# 或自动安装最近公开版本（包含预发布）
-sudo bash install.sh -y
-```
+兼容 `easycard -start`、`easycard -stop`、`easycard -restart`、`easycard -update` 和 `easycard -port`。在线更新继续执行架构、SHA-256、候选版本、健康检查和失败回滚。端口修改会先检查占用，失败时恢复原配置；只修改 `listen`，不联动反向代理常用的 `base_url`。
 
 升级前仍建议在管理后台创建并验证一份完整备份。脚本的自动回滚只恢复上一版本程序，不回滚已经执行的数据库迁移；跨版本降级必须先核对目标版本的数据兼容性，必要时使用升级前完整备份恢复。
 
@@ -92,6 +95,7 @@ sudo bash install.sh -y
 ```bash
 sudo systemctl disable --now easycard
 sudo rm -f /etc/systemd/system/easycard.service
+sudo rm -f /usr/local/bin/easycard /etc/easycard/manager.conf
 sudo systemctl daemon-reload
 # 可选: sudo rm -rf /opt/easycard
 ```
@@ -273,7 +277,7 @@ Get-FileHash .\EasyCard-1.1.0-rc.1-windows-amd64.zip -Algorithm SHA256
 - 请妥善备份 `config.json` 中的 `aes_key` 与数据库文件；密钥丢失将无法解密已有卡密。
 - `config.json`、数据库、`uploads/` 与许可证私钥必须按同一恢复点保存；不要单独恢复其中一项。
 - 生产环境建议置于反向代理之后，启用 HTTPS，并限制管理端访问来源。
-- 每次升级后确认 `systemctl status easycard`、`/health/ready`、管理端运行监控及一笔受控业务流程正常。
+- 每次升级后确认 `easycard status`、`/health/ready`、管理端运行监控及一笔受控业务流程正常。
 - 本仓库不含源码；如需商业授权或定制请通过官网联系。
 
 ## License / 声明

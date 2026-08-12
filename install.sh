@@ -20,6 +20,7 @@ VERSION="${VERSION:-}"
 ASSUME_YES=0
 CANDIDATE_DIR=""
 CANDIDATE_BIN=""
+CANDIDATE_MANAGER=""
 trap 'if [[ -n "${CANDIDATE_DIR:-}" && -d "$CANDIDATE_DIR" ]]; then rm -rf -- "$CANDIDATE_DIR"; fi' EXIT
 
 RED=$'\033[31m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; NC=$'\033[0m'
@@ -43,6 +44,7 @@ EasyCard 易卡数字平台 Linux 安装脚本
 选项:
   -d, --dir DIR       安装目录 (默认: /opt/easycard)
   -p, --port PORT     监听端口 (默认: 18765)
+  -s, --service NAME  systemd 服务名 (默认: easycard)
   -v, --version VER   可选：固定版本；省略则安装最新公开 Release（包含预发布）
   -y, --yes           非交互确认
   -h, --help          显示帮助
@@ -59,6 +61,7 @@ parse_args() {
     case "$1" in
       -d|--dir) INSTALL_DIR="$2"; shift 2 ;;
       -p|--port) PORT="$2"; shift 2 ;;
+      -s|--service) SERVICE_NAME="$2"; shift 2 ;;
       -v|--version) VERSION="$2"; shift 2 ;;
       -y|--yes) ASSUME_YES=1; shift ;;
       -h|--help) usage; exit 0 ;;
@@ -250,6 +253,7 @@ download_candidate() {
 
   tar -xzf "$archive" -C "$tmp"
   CANDIDATE_BIN="$(find "$tmp" -type f -name "$BIN_NAME" | head -n1 || true)"
+  CANDIDATE_MANAGER="$(find "$tmp" -type f -name "easycardctl.sh" | head -n1 || true)"
   [[ -n "$CANDIDATE_BIN" ]] || die "归档中未找到二进制 ${BIN_NAME}"
   chmod 755 "$CANDIDATE_BIN"
   local reported
@@ -258,6 +262,24 @@ download_candidate() {
     die "候选程序版本不匹配，期望 ${ver}，实际输出: ${reported:-无}"
   fi
   info "候选程序版本校验通过: $reported"
+}
+
+install_manager() {
+  [[ "$SERVICE_NAME" =~ ^[A-Za-z0-9_.@-]+$ ]] || die "systemd 服务名无效: $SERVICE_NAME"
+  [[ "$INSTALL_DIR" == /* && "$INSTALL_DIR" != *$'\n'* ]] || die "安装目录必须是绝对路径"
+  [[ -n "$CANDIDATE_MANAGER" ]] || die "发行包缺少 easycard 管理工具，拒绝安装不完整版本"
+  mkdir -p /etc/easycard
+  local cfg_tmp
+  cfg_tmp="$(mktemp)"
+  {
+    printf 'INSTALL_DIR=%q\n' "$INSTALL_DIR"
+    printf 'SERVICE_NAME=%q\n' "$SERVICE_NAME"
+    printf 'DEFAULT_PORT=%q\n' "$(service_port)"
+  } > "$cfg_tmp"
+  install -o root -g root -m 644 "$cfg_tmp" /etc/easycard/manager.conf
+  rm -f "$cfg_tmp"
+  install -o root -g root -m 755 "$CANDIDATE_MANAGER" /usr/local/bin/easycard
+  info "已安装管理命令: easycard（可用 start/stop/restart/update/status/logs）"
 }
 
 health_ready() {
@@ -371,6 +393,9 @@ main() {
   parse_args "$@"
   need_root
   [[ "$(uname -s)" == "Linux" ]] || die "本脚本仅支持 Linux"
+  [[ "$INSTALL_DIR" == /* && "$INSTALL_DIR" != *$'\n'* ]] || die "安装目录必须是绝对路径"
+  [[ "$SERVICE_NAME" =~ ^[A-Za-z0-9_.@-]+$ ]] || die "systemd 服务名无效: $SERVICE_NAME"
+  [[ "$PORT" =~ ^[0-9]+$ ]] && (( PORT >= 1 && PORT <= 65535 )) || die "端口必须为 1-65535"
   install_deps_hint
 
   local arch ver
@@ -392,6 +417,7 @@ main() {
   write_default_config
   write_systemd
   install_candidate "$ver"
+  install_manager
   rm -rf "$CANDIDATE_DIR"
   CANDIDATE_DIR=""
 
@@ -407,9 +433,11 @@ ${GREEN}安装完成${NC}
   http://服务器IP:${PORT}/admin
 
 常用命令:
-  systemctl status ${SERVICE_NAME}
-  systemctl restart ${SERVICE_NAME}
-  journalctl -u ${SERVICE_NAME} -f
+  easycard                 # 交互菜单
+  easycard status
+  easycard restart
+  easycard update
+  easycard logs -f
 
 EOF
 }
