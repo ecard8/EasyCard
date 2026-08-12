@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# EasyCard (易发卡) Linux 一键安装脚本
+# EasyHub Digital Commerce Platform Linux 一键安装脚本
 #
 # 推荐（宝塔同款：先落到本地再执行，避免 curl|bash 吞掉 stdin）:
 #   if [ -f /usr/bin/curl ];then curl -sSO https://raw.githubusercontent.com/ecard8/EasyCard/main/install.sh;else wget -O install.sh https://raw.githubusercontent.com/ecard8/EasyCard/main/install.sh;fi;bash install.sh -y
 #
 # 其它:
 #   sudo bash install.sh 1.0.0
-#   sudo bash install.sh --dir /opt/easycard --port 8080 --version 1.0.0
+#   sudo bash install.sh --dir /opt/easycard --port 18765 --version 1.0.0
 set -euo pipefail
 
 REPO="ecard8/EasyCard"
@@ -14,9 +14,12 @@ PRODUCT="EasyCard"
 BIN_NAME="cardgo"
 INSTALL_DIR="${INSTALL_DIR:-/opt/easycard}"
 SERVICE_NAME="${SERVICE_NAME:-easycard}"
-PORT="${PORT:-8080}"
+PORT="${PORT:-18765}"
 VERSION="${VERSION:-}"
 ASSUME_YES=0
+CANDIDATE_DIR=""
+CANDIDATE_BIN=""
+trap 'if [[ -n "${CANDIDATE_DIR:-}" && -d "$CANDIDATE_DIR" ]]; then rm -rf -- "$CANDIDATE_DIR"; fi' EXIT
 
 RED=$'\033[31m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; NC=$'\033[0m'
 info() { echo "${GREEN}[INFO]${NC} $*"; }
@@ -31,14 +34,14 @@ need_root() {
 
 usage() {
   cat <<EOF
-EasyCard Linux 安装脚本
+EasyHub 易汇数字平台 Linux 安装脚本
 
 用法:
   sudo bash install.sh [选项] [版本]
 
 选项:
   -d, --dir DIR       安装目录 (默认: /opt/easycard)
-  -p, --port PORT     监听端口 (默认: 8080)
+  -p, --port PORT     监听端口 (默认: 18765)
   -v, --version VER   指定版本，如 1.0.0；省略则安装最新 Release
   -y, --yes           非交互确认
   -h, --help          显示帮助
@@ -46,7 +49,7 @@ EasyCard Linux 安装脚本
 示例:
   sudo bash install.sh
   sudo bash install.sh 1.0.0
-  sudo bash install.sh --dir /opt/easycard --port 8080 --version 1.0.0
+  sudo bash install.sh --dir /opt/easycard --port 18765 --version 1.0.0
 EOF
 }
 
@@ -146,9 +149,14 @@ create_user() {
 }
 
 write_systemd() {
+  if [[ -f "/etc/systemd/system/${SERVICE_NAME}.service" ]]; then
+    cp -f "/etc/systemd/system/${SERVICE_NAME}.service" "${INSTALL_DIR}/${SERVICE_NAME}.service.previous"
+  else
+    rm -f "${INSTALL_DIR}/${SERVICE_NAME}.service.previous"
+  fi
   cat >"/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
 [Unit]
-Description=EasyCard (易发卡) Card Issuing Service
+Description=EasyHub Digital Commerce Platform
 After=network.target
 Wants=network-online.target
 
@@ -160,9 +168,20 @@ WorkingDirectory=${INSTALL_DIR}
 ExecStart=${INSTALL_DIR}/${BIN_NAME} -config ${INSTALL_DIR}/config.json
 Restart=on-failure
 RestartSec=3
+TimeoutStopSec=30
+KillSignal=SIGTERM
 LimitNOFILE=65535
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=${INSTALL_DIR}
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 # 仅绑定配置中的端口；默认见 config.json listen
 Environment=HOME=${INSTALL_DIR}
+Environment=CARDGO_ROOT=${INSTALL_DIR}
 
 [Install]
 WantedBy=multi-user.target
@@ -192,22 +211,24 @@ write_default_config() {
   [[ ${#sess} -eq 64 ]] || die "生成 session_secret 失败"
   cat >"$cfg" <<EOF
 {
-  "listen": ":${PORT}",
+  "listen": "${PORT}",
   "db_path": "data/data.db",
-  "base_url": "http://127.0.0.1:${PORT}",
+  "base_url": "http://localhost:18765",
+  "proxy_mode": "direct",
   "aes_key": "${aes}",
   "session_secret": "${sess}"
 }
 EOF
   chown easycard:easycard "$cfg"
   chmod 640 "$cfg"
-  info "已生成默认配置: $cfg （首次访问 /admin 完成安装向导）"
+  info "已生成默认配置: $cfg （首次访问 /admin 完成安装向导；初始化完成前请勿向公网开放监听端口）"
 }
 
-download_and_extract() {
+download_candidate() {
   local ver="$1" arch="$2" url tmp archive
   url="$(asset_url "$ver" "$arch")"
   tmp="$(mktemp -d)"
+  CANDIDATE_DIR="$tmp"
   archive="${tmp}/${PRODUCT}-${ver}-linux-${arch}.tar.gz"
   info "下载: $url"
   http_get "$url" "$archive" || die "下载失败"
@@ -225,20 +246,123 @@ download_and_extract() {
     fi
   fi
 
-  mkdir -p "$INSTALL_DIR" "$INSTALL_DIR/data" "$INSTALL_DIR/backups" "$INSTALL_DIR/logs"
   tar -xzf "$archive" -C "$tmp"
-  if [[ ! -f "${tmp}/${BIN_NAME}" ]]; then
-    # 兼容归档内带子目录
-    local found
-    found="$(find "$tmp" -type f -name "$BIN_NAME" | head -n1 || true)"
-    [[ -n "$found" ]] || die "归档中未找到二进制 ${BIN_NAME}"
-    install -m 755 "$found" "${INSTALL_DIR}/${BIN_NAME}"
-  else
-    install -m 755 "${tmp}/${BIN_NAME}" "${INSTALL_DIR}/${BIN_NAME}"
+  CANDIDATE_BIN="$(find "$tmp" -type f -name "$BIN_NAME" | head -n1 || true)"
+  [[ -n "$CANDIDATE_BIN" ]] || die "归档中未找到二进制 ${BIN_NAME}"
+  chmod 755 "$CANDIDATE_BIN"
+  local reported
+  reported="$($CANDIDATE_BIN -version 2>/dev/null || true)"
+  if [[ "$reported" != *"EasyCard ${ver}"* ]]; then
+    die "候选程序版本不匹配，期望 ${ver}，实际输出: ${reported:-无}"
   fi
+  info "候选程序版本校验通过: $reported"
+}
+
+health_ready() {
+  local check_port configured
+  check_port="$(service_port)"
+  local url="http://127.0.0.1:${check_port}/health/ready"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS --max-time 2 "$url" >/dev/null 2>&1
+  else
+    wget -q -T 2 -O /dev/null "$url" >/dev/null 2>&1
+  fi
+}
+
+service_port() {
+  local check_port="$PORT" configured
+  if [[ -f "${INSTALL_DIR}/config.json" ]]; then
+    configured="$(sed -n 's/.*"listen"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${INSTALL_DIR}/config.json" | head -n1)"
+    configured="${configured##*:}"
+    configured="${configured%]}"
+    if [[ "$configured" =~ ^[0-9]+$ ]] && (( configured >= 1 && configured <= 65535 )); then
+      check_port="$configured"
+    fi
+  fi
+  printf '%s\n' "$check_port"
+}
+
+setup_pending() {
+  local check_port body url
+  check_port="$(service_port)"
+  url="http://127.0.0.1:${check_port}/api/admin/setup/status"
+  if command -v curl >/dev/null 2>&1; then
+    body="$(curl -fsS --max-time 2 "$url" 2>/dev/null || true)"
+  else
+    body="$(wget -q -T 2 -O - "$url" 2>/dev/null || true)"
+  fi
+  printf '%s' "$body" | grep -Eq '"needed"[[:space:]]*:[[:space:]]*true'
+}
+
+DEPLOYMENT_STATE=""
+deployment_healthy() {
+  if health_ready; then
+    DEPLOYMENT_STATE="ready"
+    return 0
+  fi
+  if setup_pending; then
+    DEPLOYMENT_STATE="setup"
+    return 0
+  fi
+  return 1
+}
+
+wait_deployment() {
+  local i
+  for i in $(seq 1 30); do
+    if deployment_healthy; then return 0; fi
+    sleep 1
+  done
+  return 1
+}
+
+install_candidate() {
+  local ver="$1" had_previous=0
+  mkdir -p "$INSTALL_DIR" "$INSTALL_DIR/data" "$INSTALL_DIR/backups" "$INSTALL_DIR/logs"
+
+  if [[ -f "${INSTALL_DIR}/${BIN_NAME}" ]]; then
+    had_previous=1
+    systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
+    install -m 755 "${INSTALL_DIR}/${BIN_NAME}" "${INSTALL_DIR}/${BIN_NAME}.previous"
+    if [[ -f "${INSTALL_DIR}/VERSION" ]]; then
+      cp -f "${INSTALL_DIR}/VERSION" "${INSTALL_DIR}/VERSION.previous"
+    fi
+  fi
+
+  install -m 755 "$CANDIDATE_BIN" "${INSTALL_DIR}/${BIN_NAME}"
   echo "$ver" > "${INSTALL_DIR}/VERSION"
   chown -R easycard:easycard "$INSTALL_DIR"
-  rm -rf "$tmp"
+
+  systemctl enable "${SERVICE_NAME}" >/dev/null
+  systemctl restart "${SERVICE_NAME}"
+  if wait_deployment; then
+    if [[ "$DEPLOYMENT_STATE" == "setup" ]]; then
+      info "服务进程与数据库检查通过，正在等待首次安装向导完成；安装完成后请再验证 /health/ready"
+    else
+      info "服务就绪检查通过: http://127.0.0.1:$(service_port)/health/ready"
+    fi
+    return 0
+  fi
+
+  warn "新版本未能在 30 秒内就绪，开始自动回滚"
+  systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
+  if [[ "$had_previous" -eq 1 && -f "${INSTALL_DIR}/${BIN_NAME}.previous" ]]; then
+    install -m 755 "${INSTALL_DIR}/${BIN_NAME}.previous" "${INSTALL_DIR}/${BIN_NAME}"
+    if [[ -f "${INSTALL_DIR}/VERSION.previous" ]]; then
+      cp -f "${INSTALL_DIR}/VERSION.previous" "${INSTALL_DIR}/VERSION"
+    fi
+    if [[ -f "${INSTALL_DIR}/${SERVICE_NAME}.service.previous" ]]; then
+      cp -f "${INSTALL_DIR}/${SERVICE_NAME}.service.previous" "/etc/systemd/system/${SERVICE_NAME}.service"
+      systemctl daemon-reload
+    fi
+    chown easycard:easycard "${INSTALL_DIR}/${BIN_NAME}" "${INSTALL_DIR}/VERSION"
+    systemctl restart "${SERVICE_NAME}"
+    if wait_deployment; then
+      die "新版本启动失败，已恢复并启动上一版本；请查看 journalctl -u ${SERVICE_NAME} -e"
+    fi
+    die "新版本启动失败，上一版本回滚后也未就绪；请立即检查 journalctl -u ${SERVICE_NAME} -e"
+  fi
+  die "首次安装未能启动；未修改任何既有业务数据，请查看 journalctl -u ${SERVICE_NAME} -e"
 }
 
 main() {
@@ -259,19 +383,15 @@ main() {
   info "安装目录: ${INSTALL_DIR}  端口: ${PORT}"
   confirm
 
+  download_candidate "$ver" "$arch"
   create_user
-  download_and_extract "$ver" "$arch"
+  mkdir -p "$INSTALL_DIR" "$INSTALL_DIR/data" "$INSTALL_DIR/backups" "$INSTALL_DIR/logs"
+  chown -R easycard:easycard "$INSTALL_DIR"
   write_default_config
   write_systemd
-
-  systemctl enable "${SERVICE_NAME}" >/dev/null
-  systemctl restart "${SERVICE_NAME}"
-  sleep 1
-  if systemctl is-active --quiet "${SERVICE_NAME}"; then
-    info "服务已启动: systemctl status ${SERVICE_NAME}"
-  else
-    warn "服务可能未就绪，请查看: journalctl -u ${SERVICE_NAME} -e"
-  fi
+  install_candidate "$ver"
+  rm -rf "$CANDIDATE_DIR"
+  CANDIDATE_DIR=""
 
   cat <<EOF
 
