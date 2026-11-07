@@ -3,26 +3,85 @@
 set -euo pipefail
 
 CONFIG_FILE="${EASYCARD_MANAGER_CONFIG:-/etc/easycard/manager.conf}"
+INSTANCES_DIR="${EASYCARD_INSTANCES_DIR:-$(dirname "$CONFIG_FILE")/instances}"
 INSTALL_DIR="/opt/easycard"
 SERVICE_NAME="easycard"
 DEFAULT_PORT="18765"
 REPO="ecard8/EasyCard"
 SYSTEMD_UNIT_DIR="${EASYCARD_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 
-if [[ -r "$CONFIG_FILE" ]]; then
-  # The installer creates this root-owned file with shell-escaped values.
-  # shellcheck disable=SC1090
-  source "$CONFIG_FILE"
-fi
-
 RED=$'\033[31m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; CYAN=$'\033[36m'; NC=$'\033[0m'
 info() { echo "${GREEN}[INFO]${NC} $*"; }
 warn() { echo "${YELLOW}[WARN]${NC} $*"; }
 die() { echo "${RED}[ERR ]${NC} $*" >&2; exit 1; }
 
+valid_instance_name() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9_.@-]*$ ]]; }
+
+# Registry files are root-owned shell-escaped configuration, like legacy manager.conf.
+INSTANCE_NAMES=()
+INSTANCE_FILES=()
+discover_instances() {
+  local file name existing seen
+  INSTANCE_NAMES=(); INSTANCE_FILES=()
+  for file in "$INSTANCES_DIR"/*.conf "$CONFIG_FILE"; do
+    [[ -f "$file" ]] || continue
+    [[ -r "$file" ]] || die "无法读取实例配置: $file"
+    name="$(SERVICE_NAME=''; source "$file"; printf '%s' "$SERVICE_NAME")"
+    valid_instance_name "$name" || die "实例配置包含无效服务名: $file"
+    if [[ "$file" != "$CONFIG_FILE" && "$(basename "$file")" != "$name.conf" ]]; then
+      die "实例文件名与服务名不一致: $file"
+    fi
+    seen=0
+    for existing in "${INSTANCE_NAMES[@]}"; do [[ "$existing" != "$name" ]] || seen=1; done
+    if [[ "$seen" == 0 ]]; then
+      INSTANCE_NAMES+=("$name"); INSTANCE_FILES+=("$file")
+    fi
+  done
+}
+
+load_instance() {
+  local index="$1"
+  INSTALL_DIR=''; SERVICE_NAME=''; DEFAULT_PORT=''
+  source "${INSTANCE_FILES[$index]}"
+  validate_config
+}
+
+list_instances() {
+  local i
+  printf '%-24s %-8s %s\n' 'INSTANCE' 'PORT' 'DIRECTORY'
+  for i in "${!INSTANCE_NAMES[@]}"; do
+    (load_instance "$i"; printf '%-24s %-8s %s\n' "$SERVICE_NAME" "$(service_port)" "$INSTALL_DIR")
+  done
+}
+
+select_instance() {
+  local requested="$1" i choice
+  if [[ -n "$requested" ]]; then
+    valid_instance_name "$requested" || die "实例名无效: $requested"
+    for i in "${!INSTANCE_NAMES[@]}"; do
+      if [[ "${INSTANCE_NAMES[$i]}" == "$requested" ]]; then load_instance "$i"; return; fi
+    done
+    die "未找到实例 $requested；请执行 easycard instances"
+  fi
+  if [[ "${#INSTANCE_NAMES[@]}" == 0 ]]; then
+    die "没有已登记实例；请先安装 EasyCard"
+  elif [[ "${#INSTANCE_NAMES[@]}" == 1 ]]; then
+    load_instance 0
+    return
+  fi
+  list_instances
+  [[ -t 0 ]] || die "存在多个实例，请使用 easycard --instance <实例名> <命令>"
+  for i in "${!INSTANCE_NAMES[@]}"; do printf '  %d) %s\n' "$((i + 1))" "${INSTANCE_NAMES[$i]}"; done
+  read -r -p '请选择实例编号（0 退出）: ' choice || exit 0
+  [[ "$choice" != 0 ]] || exit 0
+  [[ "$choice" =~ ^[1-9][0-9]*$ && ${#choice} -le 6 ]] || die '无效实例编号'
+  (( choice <= ${#INSTANCE_NAMES[@]} )) || die '无效实例编号'
+  load_instance "$((choice - 1))"
+}
+
 validate_config() {
   [[ "$INSTALL_DIR" == /* && "$INSTALL_DIR" != *$'\n'* ]] || die "安装目录配置无效: $INSTALL_DIR"
-  [[ "$SERVICE_NAME" =~ ^[A-Za-z0-9_.@-]+$ ]] || die "systemd 服务名配置无效: $SERVICE_NAME"
+  valid_instance_name "$SERVICE_NAME" || die "systemd 服务名配置无效: $SERVICE_NAME"
   [[ "$DEFAULT_PORT" =~ ^[0-9]+$ ]] && (( DEFAULT_PORT >= 1 && DEFAULT_PORT <= 65535 )) || die "默认端口配置无效"
 }
 
@@ -76,7 +135,11 @@ EasyCard 易卡数字平台 Linux 管理工具
   easycard logs -f                 持续查看日志
   easycard version                 查看已安装版本
   easycard help                    显示帮助
+  easycard instances               列出所有实例、端口和目录
+  easycard --instance shop2 status  管理指定实例（-i 同义）
+  easycard --instance shop2 update  仅更新指定实例
 
+单实例沿用原命令；多实例交互时先选择实例，非交互时必须使用 --instance。
 兼容写法: easycard -start / easycard -stop / easycard -restart / easycard -update / easycard -status / easycard -port
 服务变更和更新操作需要 root 权限，建议使用 sudo easycard <命令>。
 EOF
@@ -161,6 +224,10 @@ change_port() {
     return 0
   fi
   need_root port; need_systemd
+  command -v flock >/dev/null 2>&1 || die '端口变更需要 flock'
+  exec 9>"$(dirname "$CONFIG_FILE")/install.lock"
+  flock -n 9 || die '另一个实例正在安装、更新或修改端口，请稍后再试'
+  discover_instances
   [[ "$new_port" =~ ^[0-9]+$ ]] && (( new_port >= 1 && new_port <= 65535 )) || die "端口必须为 1-65535"
   [[ -f "$cfg" ]] || die "未找到配置文件: $cfg"
   current="$(sed -n 's/.*"listen"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$cfg" | head -n1)"
@@ -172,6 +239,12 @@ change_port() {
   if port_is_listening "$new_port"; then
     die "端口 $new_port 已被占用，请选择其他端口"
   fi
+  local i reserved
+  for i in "${!INSTANCE_NAMES[@]}"; do
+    [[ "${INSTANCE_NAMES[$i]}" != "$SERVICE_NAME" ]] || continue
+    reserved="$(load_instance "$i"; service_port)"
+    [[ "$reserved" != "$new_port" ]] || die "端口 $new_port 已配置给实例 ${INSTANCE_NAMES[$i]}"
+  done
   if [[ "$current" =~ ^[0-9]+$ ]]; then
     next="$new_port"
   elif [[ "$current" == *:* && "${current##*:}" =~ ^[0-9]+$ ]]; then
@@ -191,7 +264,7 @@ change_port() {
   mv -f "$tmp" "$cfg"
   if systemctl restart "$SERVICE_NAME" && wait_health_port "$new_port"; then
     info "监听端口已从 ${current} 更换为 ${next}；base_url 保持不变"
-    command -v logger >/dev/null 2>&1 && logger -t easycard-manager "listen port changed from ${current} to ${next}"
+    command -v logger >/dev/null 2>&1 && logger -t easycard-manager "instance ${SERVICE_NAME}: listen port changed from ${current} to ${next}"
     return 0
   fi
   warn "新端口启动失败，正在恢复原配置"
@@ -210,7 +283,7 @@ update_service() {
   port="$(service_port)"
   info "正在下载官方更新器"
   download "https://raw.githubusercontent.com/${REPO}/main/install.sh" "$installer"
-  local args=(-y --dir "$INSTALL_DIR" --port "$port")
+  local args=(-y --dir "$INSTALL_DIR" --port "$port" --service "$SERVICE_NAME")
   [[ -n "$version" ]] && args+=(--version "${version#v}")
   if INSTALL_DIR="$INSTALL_DIR" SERVICE_NAME="$SERVICE_NAME" PORT="$port" bash "$installer" "${args[@]}"; then
     result=0
@@ -243,6 +316,7 @@ run_command() {
 menu() {
   [[ -t 0 ]] || { show_help; return; }
   printf '\n%sEasyCard 易卡数字平台%s\n' "$CYAN" "$NC"
+  printf '实例: %s  目录: %s  端口: %s\n' "$SERVICE_NAME" "$INSTALL_DIR" "$(service_port)"
   printf '  1) 查看状态\n  2) 启动服务\n  3) 停止服务\n  4) 重启服务\n  5) 在线更新\n  6) 查看日志\n  7) 查看版本\n  8) 更换监听端口\n  0) 退出\n'
   read -r -p "请选择 [0-8]: " choice
   case "$choice" in
@@ -259,9 +333,19 @@ menu() {
   esac
 }
 
-validate_config
-if [[ $# -eq 0 ]]; then
-  menu
-else
-  run_command "$@"
-fi
+main() {
+  local instance='' command
+  if [[ "${1:-}" == '--instance' || "${1:-}" == '-i' ]]; then
+    [[ $# -ge 2 && -n "$2" ]] || die '--instance 需要实例名'
+    instance="$2"; shift 2
+  fi
+  command="${1:-}"
+  case "$command" in help|--help|-help|-h) show_help; return ;; esac
+  discover_instances
+  case "$command" in instances|list) list_instances; return ;; esac
+  if [[ $# -eq 0 && ! -t 0 ]]; then show_help; return; fi
+  select_instance "$instance"
+  if [[ $# -eq 0 ]]; then menu; else run_command "$@"; fi
+}
+
+main "$@"

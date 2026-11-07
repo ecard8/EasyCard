@@ -24,7 +24,7 @@ EasyCard 易卡数字平台是一套数字商品智能交易与自动交付平�
 
 `EasyCard-*` 归档名、`ecard8/EasyCard` 仓库路径、`easycard` 服务用户/目录是现有发行与升级链路的兼容标识，品牌升级阶段继续保留；产品展示名称统一为 EasyCard。
 
-> **候选版升级期限：**`v1.1.0-rc.2` 客户端网页可使用至站点时区 `2026-12-30`；从 `2026-12-31 00:00` 起商城与客户中心要求升级。管理后台、`easycard update`、健康检查、API 与支付回调继续可用，因此可以安全完成升级。
+> **候选版升级期限：**每个新版本从发布日期起提供六个自然月的客户端网页使用期，目标月份无对应日期时取月末。`v1.1.0-rc.5` 发布于 `2026-11-07`，可使用至站点时区 `2027-05-07`；从 `2027-05-08 00:00` 起商城与客户中心要求升级。重新安装或重启不延长期限；管理后台、`easycard update`、健康检查、API 与支付回调继续可用。
 
 ---
 
@@ -90,6 +90,29 @@ easycard logs -f
 
 同时兼容 `easycard -restart`、`easycard -stop`、`easycard -start`、`easycard -update`、`easycard -port`。服务变更与更新需要 root 权限，普通账户使用 `sudo easycard <命令>`。`easycard update` 会复用一键安装器的架构识别、SHA-256、候选版本身份、健康检查和自动二进制回滚，不会绕过发布校验。`easycard port` 修改前检查占用，修改后验证健康并在失败时恢复原配置；它只修改 `listen`，不会修改可能由反向代理管理的 `base_url`。
 
+### 同机多实例
+
+只有一个实例时，`easycard`、`easycard restart`、`easycard update` 等原命令保持不变。新增实例后，交互命令先选择实例；脚本、计划任务等非交互调用必须使用 `--instance`（或 `-i`）。`easycard instances` 列出实例名、当前端口和目录。
+
+使用包含多实例管理工具的新版本安装器和发行包，保留原有 `easycard` 实例，并添加第二套：
+
+```bash
+sudo bash install.sh --instance easycard2 --dir /opt/easycard2 --port 18766 -y
+easycard instances
+sudo easycard --instance easycard2 restart
+sudo easycard --instance easycard2 update
+easycard --instance easycard2 logs 200
+sudo easycard --instance easycard port 18765
+```
+
+实例名就是 systemd 服务名；`--service` 与 `--instance` 使用同一标识。新命名实例省略 `--dir` 时使用 `/opt/实例名`，更新已有实例时自动使用登记的目录和实际配置端口。端口不会自动分配，添加实例时应明确指定未使用端口。安装器拒绝重名实例改绑目录、实例目录重叠、复用其他实例端口，以及覆盖无关服务或非空新目录。
+
+实例登记保存在 `/etc/easycard/instances/实例名.conf`，旧 `/etc/easycard/manager.conf` 会自动迁移并保留；新增实例不会覆盖旧默认指向。各实例分别保存数据库、配置、密钥、上传和备份，分别配置域名、`base_url` 和支付回调。更新、端口变更、日志和失败回滚只操作选中的实例；安装/更新和端口变更共用互斥锁。旧程序包更新不会降级已安装的多实例管理工具。程序回滚仍不等于数据库回滚。
+
+首次使用新安装器时，需要选择包含多实例管理工具的发行包；若候选包和本机都没有新版工具，安装器会在修改服务前停止。已经安装新版工具后，可保留它来管理兼容的旧程序包。
+
+移除某个实例时，仅停止并移除它对应的 systemd 单元和 `instances/实例名.conf`；若旧 `manager.conf` 指向该实例，也应移除该兼容配置。仍有其他实例时保留共享 `/usr/local/bin/easycard`。下方旧卸载命令仅适用于最后一个默认实例。
+
 升级（保留数据与配置）:
 
 ```bash
@@ -108,6 +131,7 @@ sudo bash install.sh -y
 sudo systemctl disable --now easycard
 sudo rm -f /etc/systemd/system/easycard.service
 sudo rm -f /usr/local/bin/easycard /etc/easycard/manager.conf
+sudo rm -f /etc/easycard/instances/easycard.conf
 sudo systemctl daemon-reload
 # 可选: sudo rm -rf /opt/easycard
 ```
