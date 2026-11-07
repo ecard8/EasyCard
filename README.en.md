@@ -19,7 +19,7 @@ Every release includes `SHA256SUMS`. Verify the archive before execution.
 
 The `EasyCard-*` archive names, `ecard8/EasyCard` repository path, and `easycard` service user/directory remain stable compatibility identifiers for the existing release and upgrade chain. User-facing product branding is EasyCard.
 
-> **Release-candidate upgrade deadline:** Each new version provides six calendar months of customer-page access from its release date, clamped to month-end when needed. `v1.1.0-rc.6` is dated `2026-11-07` and remains available through `2027-05-07` in the configured site timezone, requiring an upgrade from `2027-05-08 00:00`. Reinstalling or restarting does not extend the deadline. Administration, `easycard update`, health checks, APIs, and payment callbacks remain available.
+> **Release-candidate upgrade deadline:** Each new version provides six calendar months of customer-page access from its release date, clamped to month-end when needed. `v1.1.0-rc.7` is dated `2026-11-07` and remains available through `2027-05-07` in the configured site timezone, requiring an upgrade from `2027-05-08 00:00`. Reinstalling or restarting does not extend the deadline. Administration, `easycard update`, health checks, APIs, and payment callbacks remain available.
 
 ## Linux installer
 
@@ -82,7 +82,16 @@ Metadata is stored in `/etc/easycard/instances/NAME.conf`. Legacy `/etc/easycard
 
 For first-time use of the new installer, choose a package with the new manager. If neither the candidate nor the installed manager supports instances, installation stops before modifying services. Once installed, the new manager can remain in place when using compatible older application packages.
 
-To remove one instance, stop and remove only its systemd unit and `instances/NAME.conf`; also remove the legacy `manager.conf` if it points to that instance. Keep the shared `/usr/local/bin/easycard` while other instances remain.
+From rc.7, run `sudo easycard remove` to select an instance, or choose it in `sudo easycard` and select **10) Remove the current instance**. The default removes only its service and registration while keeping its directory. You may explicitly choose permanent directory deletion; type the instance name to confirm. Non-interactive examples:
+
+```bash
+# Keep the instance directory and data
+sudo easycard remove easycard2 --keep-data --confirm easycard2
+# Permanently delete its directory, including configuration, database, uploads and backups
+sudo easycard remove easycard2 --purge --confirm easycard2
+```
+
+Only the selected service is stopped and disabled. Removal rejects overlapping instance/shared paths, symlink directories, mount points, custom service overrides, and services that cannot be confirmed stopped. A removed default pointer is reassigned to a remaining instance. The shared manager, service account, and other instances remain intact; `sudo easycard install` still works after removing the last instance. New installation does not overwrite retained nonempty directories. External data paths are not deleted.
 
 Open `http://server-ip:18765/admin` for first-time setup:
 

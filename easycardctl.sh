@@ -9,6 +9,7 @@ SERVICE_NAME="easycard"
 DEFAULT_PORT="18765"
 REPO="ecard8/EasyCard"
 SYSTEMD_UNIT_DIR="${EASYCARD_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
+MANAGER_BIN="${EASYCARD_MANAGER_BIN:-/usr/local/bin/easycard}"
 
 RED=$'\033[31m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; CYAN=$'\033[36m'; NC=$'\033[0m'
 info() { echo "${GREEN}[INFO]${NC} $*"; }
@@ -141,6 +142,10 @@ EasyCard 易卡数字平台 Linux 管理工具
   easycard install                 交互安装新实例
   easycard install shop2 --port 18766 --dir /opt/shop2 -y
                                    安装新实例（可加 --version 固定版本）
+  easycard remove                  选择并删除实例（默认保留目录数据）
+  easycard remove shop2            删除指定实例，交互选择是否保留数据
+  easycard --instance shop2 remove --keep-data --confirm shop2
+                                   非交互删除；--purge 表示同时删除实例目录
   easycard --instance shop2 status  管理指定实例（-i 同义）
   easycard --instance shop2 update  仅更新指定实例
 
@@ -356,6 +361,148 @@ install_instance() {
   )
 }
 
+verify_managed_unit() {
+  local file="$1" directory="$2" expected actual
+  expected="$(cat <<EOF
+[Unit]
+Description=EasyCard Digital Commerce Platform
+After=network.target
+Wants=network-online.target
+[Service]
+Type=simple
+User=easycard
+Group=easycard
+WorkingDirectory=$directory
+ExecStart=$directory/cardgo -config $directory/config.json
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+KillSignal=SIGTERM
+LimitNOFILE=65535
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=$directory
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+Environment=HOME=$directory
+Environment=CARDGO_ROOT=$directory
+[Install]
+WantedBy=multi-user.target
+EOF
+)"
+  actual="$(sed -e 's/\r$//' -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$file")" || return 1
+  [[ "$actual" == "$expected" ]]
+}
+
+remove_instance() (
+  need_root remove
+  local name='' mode='' confirmation='' answer i directory other shared unit fragment dropins state pid control legacy='' survivor='' tmp
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --keep-data|--purge)
+        [[ -z "$mode" ]] || die '只能选择一种数据处理方式'
+        mode="$1"; shift ;;
+      --confirm)
+        [[ $# -ge 2 && -n "$2" ]] || die '--confirm 缺少实例名'
+        confirmation="$2"; shift 2 ;;
+      -*) die "未知删除参数: $1（删除不接受 -y，请输入实例名确认）" ;;
+      *) [[ -z "$name" ]] || die '只能删除一个实例'; name="$1"; shift ;;
+    esac
+  done
+  for shared in systemctl realpath flock; do command -v "$shared" >/dev/null 2>&1 || die "删除需要 $shared"; done
+  [[ -t 0 || ( -n "$name" && "$confirmation" == "$name" ) ]] || die '非交互删除必须指定实例名及 --confirm 同一实例名'
+  # Serialize validation, confirmation and removal with installation and port changes.
+  exec 9>"$(dirname "$CONFIG_FILE")/install.lock"
+  flock -n 9 || die '另一个实例正在安装、更新、修改端口或删除，请稍后再试'
+  discover_instances
+  select_instance "$name"
+  name="$SERVICE_NAME"
+  directory="$(realpath -m -- "$INSTALL_DIR")" || die '无法解析实例目录'
+  [[ "$INSTALL_DIR" == /* && "$INSTALL_DIR" != *[[:space:]]* && "$INSTALL_DIR" != *\\* ]] || die '实例目录格式不安全'
+  [[ "$directory" == "$(realpath -ms -- "$INSTALL_DIR")" && ! -L "$INSTALL_DIR" ]] || die '实例目录经过符号链接，拒绝自动删除'
+  case "$directory" in /|/opt|/usr|/usr/local|/etc|/var|/var/lib|/home|/root|/tmp|/run|/bin|/sbin|/lib|/lib64|/boot|/dev|/proc|/sys|/mnt|/media|/srv) die '实例目录范围过大，拒绝删除' ;; esac
+  for shared in "$(dirname "$CONFIG_FILE")" "$INSTANCES_DIR" "$SYSTEMD_UNIT_DIR" "$(dirname "$MANAGER_BIN")"; do
+    shared="$(realpath -m -- "$shared")"
+    [[ "$directory" != "$shared" && "$directory" != "$shared/"* && "$shared" != "$directory/"* ]] || die '实例目录与共享管理文件重叠，拒绝删除'
+  done
+  for i in "${!INSTANCE_NAMES[@]}"; do
+    [[ "${INSTANCE_NAMES[$i]}" != "$name" ]] || continue
+    other="$(load_instance "$i"; realpath -m -- "$INSTALL_DIR")" || die '无法验证其他实例目录'
+    [[ "$other" != "$directory" && "$other" != "$directory/"* && "$directory" != "$other/"* ]] || die "目录与实例 ${INSTANCE_NAMES[$i]} 重叠，拒绝删除"
+    [[ -n "$survivor" ]] || survivor="${INSTANCE_FILES[$i]}"
+  done
+  if [[ -f "$CONFIG_FILE" ]]; then legacy="$(SERVICE_NAME=''; source "$CONFIG_FILE"; printf '%s' "$SERVICE_NAME")"; fi
+  unit="$SYSTEMD_UNIT_DIR/$name.service"
+  [[ -f "$unit" && ! -L "$unit" ]] || die '目标服务文件缺失或为符号链接，拒绝自动删除'
+  verify_managed_unit "$unit" "$directory" || die '服务文件不是标准管理模板或已被自定义，拒绝自动删除'
+  [[ ! -e "$unit.d" ]] || die '服务存在自定义覆盖目录，请先人工核对'
+  fragment="$(systemctl show "$name.service" --property=FragmentPath --value)" || die '无法确认目标服务来源'
+  [[ "$fragment" == "$unit" ]] || die 'systemd 实际服务来源与登记不一致，拒绝删除'
+  dropins="$(systemctl show "$name.service" --property=DropInPaths --value)" || die '无法核对服务覆盖配置'
+  [[ -z "$dropins" ]] || die '服务存在覆盖配置，请先人工核对'
+  # Reverse dependencies can live in another unit even when this file is standard.
+  local relationship dependents
+  for relationship in ConsistsOf PropagatesStopTo BoundBy RequiredBy RequisiteOf ExecStop ExecStopPost; do
+    dependents="$(systemctl show "$name.service" "--property=$relationship" --value)" || die '无法核对服务停止依赖'
+    [[ -z "$dependents" ]] || die "服务存在联动依赖 $relationship: $dependents；拒绝自动删除"
+  done
+  printf '\n将删除实例: %s\n服务: %s.service\n目录: %s\n端口: %s\n' "$name" "$name" "$directory" "$(service_port)"
+  if [[ -z "$mode" && -t 0 ]]; then
+    printf '  1) 移除服务与登记，保留目录数据（默认）\n  2) 同时永久删除该实例目录及其中全部数据\n  0) 取消\n'
+    read -r -p '请选择 [1]: ' answer || exit 0
+    case "$answer" in ''|1) mode=--keep-data ;; 2) mode=--purge ;; 0) info '已取消删除'; exit 0 ;; *) die '无效选项' ;; esac
+  fi
+  mode="${mode:---keep-data}"
+  if [[ "$mode" == --purge ]]; then
+    command -v findmnt >/dev/null 2>&1 || die '清除数据需要 findmnt 检查挂载目录'
+    local mounts mount
+    mounts="$(findmnt -rn -o TARGET)" || die '无法确认挂载情况，拒绝清除数据'
+    while IFS= read -r mount; do
+      [[ "$mount" != "$directory" && "$mount" != "$directory/"* ]] || die '实例目录中存在挂载点，拒绝递归清除'
+    done <<< "$mounts"
+    warn "将永久删除 $directory 内的配置、数据库、上传、备份和程序；外部数据路径不会清除"
+  else
+    info "保留目录及全部数据: $directory"
+  fi
+  if [[ -z "$confirmation" && -t 0 ]]; then
+    read -r -p "请输入实例名 $name 确认删除（其他输入取消）: " confirmation || exit 0
+    if [[ "$confirmation" != "$name" ]]; then info '已取消删除'; exit 0; fi
+  fi
+  [[ "$confirmation" == "$name" ]] || die '确认实例名不匹配，未删除'
+  systemctl stop "$name.service" || die '服务停止失败，未删除文件或登记'
+  state="$(systemctl show "$name.service" --property=ActiveState --value)" || die '无法确认服务已停止，未删除文件或登记'
+  pid="$(systemctl show "$name.service" --property=MainPID --value)" || die '无法确认服务进程，未删除文件或登记'
+  control="$(systemctl show "$name.service" --property=ControlPID --value)" || die '无法确认服务控制进程，未删除文件或登记'
+  [[ ( "$state" == inactive || "$state" == failed ) && "$pid" == 0 && "$control" == 0 ]] || die '服务仍在运行，未删除文件或登记'
+  systemctl disable "$name.service" || die '禁用服务失败，实例已停止，文件与登记保留'
+  if [[ "$mode" == --purge && -e "$directory" ]]; then
+    [[ ! -L "$directory" && "$(realpath -e -- "$directory")" == "$directory" ]] || die '目录在确认后发生变化，拒绝清除'
+    mounts="$(findmnt -rn -o TARGET)" || die '无法再次确认挂载情况，拒绝清除数据'
+    while IFS= read -r mount; do
+      [[ "$mount" != "$directory" && "$mount" != "$directory/"* ]] || die '确认后出现挂载点，拒绝清除数据'
+    done <<< "$mounts"
+    rm -rf --one-file-system --preserve-root=all -- "$directory" || die '数据清除未完成，实例已停止，服务文件与登记保留'
+  fi
+  rm -f -- "$unit" || die '移除服务文件失败，实例登记保留'
+  systemctl daemon-reload || die '重新加载服务配置失败，实例登记保留，请人工核对'
+  if [[ "$legacy" == "$name" ]]; then
+    if [[ -n "$survivor" ]]; then
+      tmp="$(mktemp "${CONFIG_FILE}.tmp.XXXXXX")"
+      trap '[[ -z "${tmp:-}" ]] || rm -f -- "$tmp"' EXIT
+      install -o root -g root -m 644 "$survivor" "$tmp"
+      mv -f -- "$tmp" "$CONFIG_FILE"; tmp=''
+    else
+      rm -f -- "$CONFIG_FILE"
+    fi
+  fi
+  rm -f -- "$INSTANCES_DIR/$name.conf"
+  info "已删除实例 $name；其他实例、共享管理命令和系统账户保留"
+  [[ "$mode" != --keep-data ]] || info "数据仍在 $directory；重新使用前请人工核对，安装器不会覆盖非空目录"
+)
+
 update_service() {
   need_root "$@"; need_systemd
   local version="${1:-}" tmp installer port result
@@ -398,8 +545,8 @@ menu() {
   [[ -t 0 ]] || { show_help; return; }
   printf '\n%sEasyCard 易卡数字平台%s\n' "$CYAN" "$NC"
   printf '实例: %s  目录: %s  端口: %s\n' "$SERVICE_NAME" "$INSTALL_DIR" "$(service_port)"
-  printf '  1) 查看状态\n  2) 启动服务\n  3) 停止服务\n  4) 重启服务\n  5) 在线更新\n  6) 查看日志\n  7) 查看版本\n  8) 更换监听端口\n  9) 安装新实例\n  0) 退出\n'
-  read -r -p "请选择 [0-9]: " choice
+  printf '  1) 查看状态\n  2) 启动服务\n  3) 停止服务\n  4) 重启服务\n  5) 在线更新\n  6) 查看日志\n  7) 查看版本\n  8) 更换监听端口\n  9) 安装新实例\n  10) 删除当前实例\n  0) 退出\n'
+  read -r -p "请选择 [0-10]: " choice
   case "$choice" in
     1) show_status || true ;;
     2) start_service start ;;
@@ -410,6 +557,7 @@ menu() {
     7) show_version ;;
     8) read -r -p "请输入新端口（1-65535）: " new_port; change_port "$new_port" ;;
     9) install_instance ;;
+    10) remove_instance "$SERVICE_NAME" ;;
     0) return ;;
     *) warn "无效选项" ;;
   esac
@@ -423,6 +571,11 @@ main() {
   fi
   command="${1:-}"
   case "$command" in help|--help|-help|-h) show_help; return ;; esac
+  if [[ "$command" == remove || "$command" == uninstall ]]; then
+    shift
+    if [[ -n "$instance" ]]; then remove_instance "$instance" "$@"; else remove_instance "$@"; fi
+    return
+  fi
   if [[ "$command" == install ]]; then
     [[ -z "$instance" ]] || die '新增实例请使用 easycard install <新实例名>，不要加前置 --instance'
     shift; install_instance "$@"; return

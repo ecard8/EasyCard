@@ -378,8 +378,11 @@ install_manager() {
   fi
   # An older application package must not downgrade the shared multi-instance manager.
   if grep -q 'EASYCARD_INSTANCES_DIR' "$CANDIDATE_MANAGER"; then
-    if [[ -f "$MANAGER_BIN" ]] && grep -q '^install_instance()' "$MANAGER_BIN" && ! grep -q '^install_instance()' "$CANDIDATE_MANAGER"; then
-      info '保留已安装的新版管理工具及新增实例入口'
+    if [[ -f "$MANAGER_BIN" ]] && {
+      { grep -q '^install_instance()' "$MANAGER_BIN" && ! grep -q '^install_instance()' "$CANDIDATE_MANAGER"; } ||
+      { grep -q '^remove_instance()' "$MANAGER_BIN" && ! grep -q '^remove_instance()' "$CANDIDATE_MANAGER"; }
+    }; then
+      info '保留已安装的新版管理工具及实例安装/删除入口'
     else
       install -o root -g root -m 755 "$CANDIDATE_MANAGER" "$MANAGER_BIN"
     fi
