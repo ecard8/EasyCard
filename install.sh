@@ -26,6 +26,7 @@ MANAGER_BIN="${EASYCARD_MANAGER_BIN:-/usr/local/bin/easycard}"
 SYSTEMD_UNIT_DIR="${EASYCARD_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 VERSION="${VERSION:-}"
 ASSUME_YES=0
+NEW_INSTANCE_ONLY=0
 CANDIDATE_DIR=""
 CANDIDATE_BIN=""
 CANDIDATE_MANAGER=""
@@ -54,6 +55,7 @@ EasyCard 易卡数字平台 Linux 安装脚本
   -p, --port PORT     监听端口 (默认: 18765)
   -s, --service NAME  systemd 服务名 (默认: easycard)
   -i, --instance NAME 实例名（与服务名相同；新实例默认目录 /opt/NAME）
+      --new-instance 仅新装；同名实例或服务已存在时拒绝，不会转为更新
   -v, --version VER   可选：固定版本；省略则安装最新公开 Release（包含预发布）
   -y, --yes           非交互确认
   -h, --help          显示帮助
@@ -74,6 +76,7 @@ parse_args() {
       -i|--instance) SERVICE_NAME="${2:?缺少实例名}"; shift 2 ;;
       -v|--version) VERSION="$2"; shift 2 ;;
       -y|--yes) ASSUME_YES=1; shift ;;
+      --new-instance) NEW_INSTANCE_ONLY=1; shift ;;
       -h|--help) usage; exit 0 ;;
       -*) die "未知参数: $1" ;;
       *) VERSION="$1"; shift ;;
@@ -302,12 +305,16 @@ prepare_instance() {
     fi
     records+=("$metadata")
     if [[ "$name" == "$SERVICE_NAME" ]]; then
+      [[ "$NEW_INSTANCE_ONLY" == 0 ]] || die "实例 $name 已存在，拒绝将新装变为更新"
       matched=1
       if [[ "$DIR_EXPLICIT" == 0 ]]; then INSTALL_DIR="$directory"; fi
       [[ "$(realpath -m -- "$INSTALL_DIR")" == "$directory" ]] || die "实例 $name 已绑定目录 $directory"
       if [[ "$PORT_EXPLICIT" == 0 ]]; then PORT="$configured"; fi
     fi
   done
+  if [[ "$NEW_INSTANCE_ONLY" == 1 && ( -e "$SYSTEMD_UNIT_DIR/$SERVICE_NAME.service" || -L "$SYSTEMD_UNIT_DIR/$SERVICE_NAME.service" ) ]]; then
+    die "同名服务已存在，拒绝覆盖: $SERVICE_NAME"
+  fi
   if [[ "$matched" == 0 && "$DIR_EXPLICIT" == 0 && "$SERVICE_NAME" != easycard ]]; then
     INSTALL_DIR="/opt/$SERVICE_NAME"
   fi
@@ -371,7 +378,11 @@ install_manager() {
   fi
   # An older application package must not downgrade the shared multi-instance manager.
   if grep -q 'EASYCARD_INSTANCES_DIR' "$CANDIDATE_MANAGER"; then
-    install -o root -g root -m 755 "$CANDIDATE_MANAGER" "$MANAGER_BIN"
+    if [[ -f "$MANAGER_BIN" ]] && grep -q '^install_instance()' "$MANAGER_BIN" && ! grep -q '^install_instance()' "$CANDIDATE_MANAGER"; then
+      info '保留已安装的新版管理工具及新增实例入口'
+    else
+      install -o root -g root -m 755 "$CANDIDATE_MANAGER" "$MANAGER_BIN"
+    fi
   fi
   info "已登记实例 $SERVICE_NAME；管理命令: easycard --instance $SERVICE_NAME <命令>"
 }

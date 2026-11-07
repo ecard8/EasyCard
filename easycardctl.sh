@@ -55,7 +55,7 @@ list_instances() {
 }
 
 select_instance() {
-  local requested="$1" i choice
+  local requested="$1" allow_install="${2:-0}" i choice
   if [[ -n "$requested" ]]; then
     valid_instance_name "$requested" || die "实例名无效: $requested"
     for i in "${!INSTANCE_NAMES[@]}"; do
@@ -72,7 +72,9 @@ select_instance() {
   list_instances
   [[ -t 0 ]] || die "存在多个实例，请使用 easycard --instance <实例名> <命令>"
   for i in "${!INSTANCE_NAMES[@]}"; do printf '  %d) %s\n' "$((i + 1))" "${INSTANCE_NAMES[$i]}"; done
+  [[ "$allow_install" != 1 ]] || printf '  n) 安装新实例\n'
   read -r -p '请选择实例编号（0 退出）: ' choice || exit 0
+  if [[ "$allow_install" == 1 && "$choice" == n ]]; then install_instance; exit $?; fi
   [[ "$choice" != 0 ]] || exit 0
   [[ "$choice" =~ ^[1-9][0-9]*$ && ${#choice} -le 6 ]] || die '无效实例编号'
   (( choice <= ${#INSTANCE_NAMES[@]} )) || die '无效实例编号'
@@ -136,10 +138,13 @@ EasyCard 易卡数字平台 Linux 管理工具
   easycard version                 查看已安装版本
   easycard help                    显示帮助
   easycard instances               列出所有实例、端口和目录
+  easycard install                 交互安装新实例
+  easycard install shop2 --port 18766 --dir /opt/shop2 -y
+                                   安装新实例（可加 --version 固定版本）
   easycard --instance shop2 status  管理指定实例（-i 同义）
   easycard --instance shop2 update  仅更新指定实例
 
-单实例沿用原命令；多实例交互时先选择实例，非交互时必须使用 --instance。
+单实例沿用原命令；多实例服务操作须选择实例。install 是全局操作，无需选择旧实例。
 兼容写法: easycard -start / easycard -stop / easycard -restart / easycard -update / easycard -status / easycard -port
 服务变更和更新操作需要 root 权限，建议使用 sudo easycard <命令>。
 EOF
@@ -275,6 +280,82 @@ change_port() {
   die "端口修改失败，已恢复原配置；请执行 easycard logs 查看原因"
 }
 
+install_instance() {
+  need_root install
+  command -v systemctl >/dev/null 2>&1 || die '当前系统未提供 systemctl'
+  local name='' directory='' port='' version='' yes=0 suggested suffix i reserved answer
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dir|--port|--version)
+        [[ $# -ge 2 && -n "$2" && "$2" != -* ]] || die "$1 缺少参数"
+        case "$1" in --dir) directory="$2" ;; --port) port="$2" ;; --version) version="${2#v}" ;; esac
+        shift 2 ;;
+      -y|--yes) yes=1; shift ;;
+      -*) die "未知安装参数: $1" ;;
+      *) [[ -z "$name" ]] || die '只能指定一个新实例名'; name="$1"; shift ;;
+    esac
+  done
+  discover_instances
+  if [[ ! -t 0 ]]; then
+    [[ -n "$name" && -n "$port" && "$yes" == 1 ]] || die '非交互安装用法: sudo easycard install <新实例名> --port <空闲端口> [--dir <目录>] [-y]（必须加 -y）'
+  fi
+  if [[ -z "$name" ]]; then
+    suffix=2
+    while :; do
+      suggested="easycard$suffix"; reserved=0
+      for i in "${INSTANCE_NAMES[@]}"; do [[ "$i" != "$suggested" ]] || reserved=1; done
+      if [[ "$reserved" == 0 && ! -e "/opt/$suggested" && ! -e "$SYSTEMD_UNIT_DIR/$suggested.service" ]]; then break; fi
+      suffix=$((suffix + 1))
+    done
+    read -r -p "新实例名 [$suggested]: " name || return 0
+    name="${name:-$suggested}"
+  fi
+  valid_instance_name "$name" || die '实例名只能使用字母、数字、点、下划线、@ 和连字符，且以字母或数字开头'
+  for i in "${INSTANCE_NAMES[@]}"; do [[ "$name" != "$i" ]] || die "实例 $name 已存在；更新请使用 easycard --instance $name update"; done
+  [[ ! -e "$SYSTEMD_UNIT_DIR/$name.service" && ! -L "$SYSTEMD_UNIT_DIR/$name.service" ]] || die "同名服务已存在: $name"
+  if [[ -z "$directory" ]]; then
+    directory="/opt/$name"
+    if [[ -t 0 && "$yes" == 0 ]]; then
+      read -r -p "安装目录 [$directory]: " answer || return 0
+      directory="${answer:-$directory}"
+    fi
+  fi
+  if [[ -z "$port" ]]; then
+    suggested=18766
+    while (( suggested <= 65535 )); do
+      reserved=0
+      for i in "${!INSTANCE_NAMES[@]}"; do
+        [[ "$(load_instance "$i"; service_port)" != "$suggested" ]] || reserved=1
+      done
+      if [[ "$reserved" == 0 ]] && ! port_is_listening "$suggested"; then break; fi
+      suggested=$((suggested + 1))
+    done
+    (( suggested <= 65535 )) || die '没有可推荐的空闲端口，请显式指定 --port'
+    read -r -p "监听端口 [$suggested]: " port || return 0
+    port="${port:-$suggested}"
+  fi
+  [[ "$port" =~ ^[1-9][0-9]{0,4}$ ]] && (( port <= 65535 )) || die '端口必须为 1-65535，且不带前导零'
+  [[ "$directory" == /* && "$directory" != *[[:space:]]* ]] || die '安装目录必须是无空白绝对路径'
+  [[ -z "$version" || "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || die '版本号格式无效'
+  printf '\n新实例: %s\n目录: %s\n端口: %s\n版本: %s\n' "$name" "$directory" "$port" "${version:-最新公开版本}"
+  if [[ "$yes" == 0 ]]; then
+    read -r -p '确认安装新实例？[y/N]: ' answer || return 0
+    case "$answer" in y|Y|yes|YES) ;; *) info '已取消安装'; return 0 ;; esac
+  fi
+  local -a args=(--new-instance --instance "$name" --dir "$directory" --port "$port" -y)
+  [[ -z "$version" ]] || args+=(--version "$version")
+  # Do not inherit the selected instance or library-only mode into the installer.
+  (
+    local tmp
+    tmp="$(mktemp -d)"
+    trap 'rm -rf -- "$tmp"' EXIT
+    info '正在下载官方安装器'
+    download "https://raw.githubusercontent.com/${REPO}/main/install.sh" "$tmp/install.sh" || exit 1
+    unset INSTALL_DIR SERVICE_NAME PORT VERSION EASYCARD_INSTALLER_LIBRARY
+    bash "$tmp/install.sh" "${args[@]}"
+  )
+}
+
 update_service() {
   need_root "$@"; need_systemd
   local version="${1:-}" tmp installer port result
@@ -317,8 +398,8 @@ menu() {
   [[ -t 0 ]] || { show_help; return; }
   printf '\n%sEasyCard 易卡数字平台%s\n' "$CYAN" "$NC"
   printf '实例: %s  目录: %s  端口: %s\n' "$SERVICE_NAME" "$INSTALL_DIR" "$(service_port)"
-  printf '  1) 查看状态\n  2) 启动服务\n  3) 停止服务\n  4) 重启服务\n  5) 在线更新\n  6) 查看日志\n  7) 查看版本\n  8) 更换监听端口\n  0) 退出\n'
-  read -r -p "请选择 [0-8]: " choice
+  printf '  1) 查看状态\n  2) 启动服务\n  3) 停止服务\n  4) 重启服务\n  5) 在线更新\n  6) 查看日志\n  7) 查看版本\n  8) 更换监听端口\n  9) 安装新实例\n  0) 退出\n'
+  read -r -p "请选择 [0-9]: " choice
   case "$choice" in
     1) show_status || true ;;
     2) start_service start ;;
@@ -328,6 +409,7 @@ menu() {
     6) show_logs 100 ;;
     7) show_version ;;
     8) read -r -p "请输入新端口（1-65535）: " new_port; change_port "$new_port" ;;
+    9) install_instance ;;
     0) return ;;
     *) warn "无效选项" ;;
   esac
@@ -341,10 +423,17 @@ main() {
   fi
   command="${1:-}"
   case "$command" in help|--help|-help|-h) show_help; return ;; esac
+  if [[ "$command" == install ]]; then
+    [[ -z "$instance" ]] || die '新增实例请使用 easycard install <新实例名>，不要加前置 --instance'
+    shift; install_instance "$@"; return
+  fi
   discover_instances
   case "$command" in instances|list) list_instances; return ;; esac
   if [[ $# -eq 0 && ! -t 0 ]]; then show_help; return; fi
-  select_instance "$instance"
+  if [[ $# -eq 0 && -z "$instance" && ${#INSTANCE_NAMES[@]} == 0 ]]; then install_instance; return; fi
+  local allow_install=0
+  [[ $# -ne 0 ]] || allow_install=1
+  select_instance "$instance" "$allow_install"
   if [[ $# -eq 0 ]]; then menu; else run_command "$@"; fi
 }
 

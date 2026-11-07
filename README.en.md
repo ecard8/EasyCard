@@ -19,7 +19,7 @@ Every release includes `SHA256SUMS`. Verify the archive before execution.
 
 The `EasyCard-*` archive names, `ecard8/EasyCard` repository path, and `easycard` service user/directory remain stable compatibility identifiers for the existing release and upgrade chain. User-facing product branding is EasyCard.
 
-> **Release-candidate upgrade deadline:** Each new version provides six calendar months of customer-page access from its release date, clamped to month-end when needed. `v1.1.0-rc.5` is dated `2026-11-07` and remains available through `2027-05-07` in the configured site timezone, requiring an upgrade from `2027-05-08 00:00`. Reinstalling or restarting does not extend the deadline. Administration, `easycard update`, health checks, APIs, and payment callbacks remain available.
+> **Release-candidate upgrade deadline:** Each new version provides six calendar months of customer-page access from its release date, clamped to month-end when needed. `v1.1.0-rc.6` is dated `2026-11-07` and remains available through `2027-05-07` in the configured site timezone, requiring an upgrade from `2027-05-08 00:00`. Reinstalling or restarting does not extend the deadline. Administration, `easycard update`, health checks, APIs, and payment callbacks remain available.
 
 ## Linux installer
 
@@ -57,10 +57,16 @@ The dash aliases `easycard -restart`, `-stop`, `-start`, `-update`, and `-port` 
 
 With one instance, existing commands such as `easycard`, `easycard restart`, and `easycard update` keep their behavior. With multiple instances, interactive calls first select an instance; non-interactive calls must specify `--instance` (or `-i`). Run `easycard instances` to list names, current ports, and directories.
 
-Use an installer and release package containing the multi-instance manager, then add a second instance while retaining the original `easycard`:
+After updating to rc.6, run `sudo easycard` and choose **9) Install a new instance**. With multiple instances, enter **n** at the instance selector to add one directly. Or start the wizard:
 
 ```bash
-sudo bash install.sh --instance easycard2 --dir /opt/easycard2 --port 18766 -y
+sudo easycard install
+```
+
+The wizard asks for a name, directory, and suggested available port, then confirms before installation. Non-interactive calls require a name, port, and `-y`; optionally pin a release with `--version`:
+
+```bash
+sudo easycard install easycard2 --dir /opt/easycard2 --port 18766 -y
 easycard instances
 sudo easycard --instance easycard2 restart
 sudo easycard --instance easycard2 update
@@ -68,7 +74,9 @@ easycard --instance easycard2 logs 200
 sudo easycard --instance easycard port 18765
 ```
 
-The instance name is its systemd service name; `--service` and `--instance` identify the same target. A new named instance defaults to `/opt/NAME` if `--dir` is omitted. Updates reuse the registered directory and actual configured port. Ports are not automatically allocated: specify an unused port for a new instance. The installer rejects rebinding an existing name to another directory, overlapping instance directories, another instance's port, unrelated services, and nonempty new directories.
+Installation is a global action and does not require selecting an old instance. It rejects existing names and rechecks under the installer lock, never turning a new installation into an update. The standalone installer remains available: `sudo bash install.sh --new-instance --instance easycard2 --dir /opt/easycard2 --port 18766 -y`.
+
+The instance name is its systemd service name; the installer's `--service` and `--instance` identify the same target. New instances default to `/opt/NAME`; updates reuse the registered directory and actual port. Suggested ports are checked again during installation, and non-interactive calls must specify an unused port. Overlapping directories, conflicting ports, unrelated services, and nonempty new directories are rejected.
 
 Metadata is stored in `/etc/easycard/instances/NAME.conf`. Legacy `/etc/easycard/manager.conf` is imported and retained without changing its default target when another instance is added. Each instance keeps its own database, configuration, keys, uploads, and backups; configure each domain, `base_url`, and payment callback separately. Updates, port changes, logs, and failed-upgrade rollback target only the selected instance. Installation, updates, and port changes share a lock. Older application packages do not downgrade an installed multi-instance manager. Binary rollback does not roll back database migrations.
 

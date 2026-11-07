@@ -24,7 +24,7 @@ EasyCard 易卡数字平台是一套数字商品智能交易与自动交付平�
 
 `EasyCard-*` 归档名、`ecard8/EasyCard` 仓库路径、`easycard` 服务用户/目录是现有发行与升级链路的兼容标识，品牌升级阶段继续保留；产品展示名称统一为 EasyCard。
 
-> **候选版升级期限：**每个新版本从发布日期起提供六个自然月的客户端网页使用期，目标月份无对应日期时取月末。`v1.1.0-rc.5` 发布于 `2026-11-07`，可使用至站点时区 `2027-05-07`；从 `2027-05-08 00:00` 起商城与客户中心要求升级。重新安装或重启不延长期限；管理后台、`easycard update`、健康检查、API 与支付回调继续可用。
+> **候选版升级期限：**每个新版本从发布日期起提供六个自然月的客户端网页使用期，目标月份无对应日期时取月末。`v1.1.0-rc.6` 发布于 `2026-11-07`，可使用至站点时区 `2027-05-07`；从 `2027-05-08 00:00` 起商城与客户中心要求升级。重新安装或重启不延长期限；管理后台、`easycard update`、健康检查、API 与支付回调继续可用。
 
 ---
 
@@ -94,10 +94,16 @@ easycard logs -f
 
 只有一个实例时，`easycard`、`easycard restart`、`easycard update` 等原命令保持不变。新增实例后，交互命令先选择实例；脚本、计划任务等非交互调用必须使用 `--instance`（或 `-i`）。`easycard instances` 列出实例名、当前端口和目录。
 
-使用包含多实例管理工具的新版本安装器和发行包，保留原有 `easycard` 实例，并添加第二套：
+从旧版本升级到 rc.6 后，运行 `sudo easycard` 并选择 **9) 安装新实例**；已有多个实例时，在实例选择页输入 **n** 可直接新增。也可以直接启动安装向导：
 
 ```bash
-sudo bash install.sh --instance easycard2 --dir /opt/easycard2 --port 18766 -y
+sudo easycard install
+```
+
+向导提示实例名、目录和推荐空闲端口，并在确认后安装。非交互调用必须提供实例名、端口和 `-y`；可用 `--version` 固定版本：
+
+```bash
+sudo easycard install easycard2 --dir /opt/easycard2 --port 18766 -y
 easycard instances
 sudo easycard --instance easycard2 restart
 sudo easycard --instance easycard2 update
@@ -105,7 +111,9 @@ easycard --instance easycard2 logs 200
 sudo easycard --instance easycard port 18765
 ```
 
-实例名就是 systemd 服务名；`--service` 与 `--instance` 使用同一标识。新命名实例省略 `--dir` 时使用 `/opt/实例名`，更新已有实例时自动使用登记的目录和实际配置端口。端口不会自动分配，添加实例时应明确指定未使用端口。安装器拒绝重名实例改绑目录、实例目录重叠、复用其他实例端口，以及覆盖无关服务或非空新目录。
+新增命令无需先选择旧实例。`install` 拒绝已有名称，且安装器在持有互斥锁后再次检查，不会将新增操作变为更新。也可继续使用独立安装器：`sudo bash install.sh --new-instance --instance easycard2 --dir /opt/easycard2 --port 18766 -y`。
+
+实例名就是 systemd 服务名；安装器的 `--service` 与 `--instance` 使用同一标识。新实例省略 `--dir` 时使用 `/opt/实例名`，更新已有实例时使用登记目录和实际端口。向导推荐的端口仍会在安装时检查；非交互调用应指定空闲端口。安装器拒绝目录重叠、端口冲突，以及覆盖无关服务或非空新目录。
 
 实例登记保存在 `/etc/easycard/instances/实例名.conf`，旧 `/etc/easycard/manager.conf` 会自动迁移并保留；新增实例不会覆盖旧默认指向。各实例分别保存数据库、配置、密钥、上传和备份，分别配置域名、`base_url` 和支付回调。更新、端口变更、日志和失败回滚只操作选中的实例；安装/更新和端口变更共用互斥锁。旧程序包更新不会降级已安装的多实例管理工具。程序回滚仍不等于数据库回滚。
 
