@@ -24,11 +24,13 @@ EasyCard 易卡数字平台是一套数字商品智能交易与自动交付平�
 
 `EasyCard-*` 归档名、`ecard8/EasyCard` 仓库路径、`easycard` 服务用户/目录是现有发行与升级链路的兼容标识，品牌升级阶段继续保留；产品展示名称统一为 EasyCard。
 
-> **候选版升级期限：**每个新版本从发布日期起提供六个自然月的客户端网页使用期，目标月份无对应日期时取月末。`v1.1.0-rc.9` 发布于 `2026-11-11`，可使用至站点时区 `2027-05-11`；从 `2027-05-12 00:00` 起商城与客户中心要求升级。重新安装或重启不延长期限；管理后台、`easycard update`、健康检查、API 与支付回调继续可用。
+> **候选版升级期限：**每个新版本从发布日期起提供六个自然月的客户端网页使用期，目标月份无对应日期时取月末。`v1.1.0-rc.10` 发布于 `2026-11-11`，可使用至站点时区 `2027-05-11`；从 `2027-05-12 00:00` 起商城与客户中心要求升级。重新安装或重启不延长期限；管理后台、`easycard update`、健康检查、API 与支付回调继续可用。
 
 ---
 
 ## 邮件配置（SMTP / Resend）
+
+Resend 官方入口：[注册账号](https://resend.com/signup)、[创建或管理 API Key](https://resend.com/api-keys)、[添加及验证发信域名](https://resend.com/domains)。后两项需登录 Resend 控制台；密钥仅填入本实例后台。
 
 SMTP 保持默认，已有配置可继续使用。使用 Resend 时，在每个实例的 **系统设置 → 邮件配置** 中选择 **Resend**，填写 API Key 和发件人（如 `EasyCard <noreply@auth.example.com>`）并保存；无需设置环境变量或重启。密钥加密保存在该实例数据库中，重新读取只显示 `********`；留空或保留掩码会保留原密钥，输入新值才轮换。
 
@@ -37,6 +39,21 @@ SMTP 保持默认，已有配置可继续使用。使用 Resend 时，在每个�
 3. 在后台集成验收中明确确认邮件通道验收，再启用所需验证码或业务邮件功能。切换通道、修改密钥或发件人后须重新测试与验收；多实例分别配置、分别验收。
 
 Resend 验证码正文包含站名、验证码、实际有效分钟数及非本人操作忽略提示；沿用原有过期、单次消费和限流规则，发信本身不会将用户邮箱标记为已验证。SMTP 自定义模板保留。当前真实收件证据仅为用户确认的 Gmail 测试，不代表正式域名、生产 DNS 和其他邮箱已通过验收。
+
+## 注册方式与仅邮箱注册
+
+在 **系统设置 → 注册/登录** 中分别控制“允许邮箱注册”和“允许手机号注册”；两项默认开启，升级时缺失的设置也按开启处理。“允许注册”是总开关，关闭后禁止所有新注册。关闭某一种方式也会禁止该方式的注册验证码发送，但不影响已有用户登录、绑定联系方式或找回密码。
+
+仅允许邮箱注册并要求验证码时，先保存 SMTP 或 Resend 配置、确认实际收到测试邮件并记录验收，再保存以下注册设置：
+
+| 设置 | 值 |
+| --- | --- |
+| 允许注册 `allow_register` | `1` |
+| 允许邮箱注册 `allow_email_register` | `1` |
+| 允许手机号注册 `allow_phone_register` | `0` |
+| 注册邮箱验证 `reg_email_enable` | `1` |
+
+这组设置只限制新注册；已有手机号账号仍可正常登录。注册方式开关与验证码要求独立：允许邮箱注册不自动要求邮箱验证，也不代替邮件通道验收。
 
 ## Linux 一键安装（推荐）
 
@@ -54,7 +71,7 @@ if [ -f /usr/bin/curl ];then curl -sSO https://raw.githubusercontent.com/ecard8/
 bash install.sh --dir /opt/easycard --port 18765 -y
 ```
 
-需要复现、回滚或受控验收时，可额外使用 `--version 1.1.0-rc.2` 固定版本。
+需要复现、回滚或受控验收时，可额外使用 `--version 1.1.0-rc.10` 固定版本。
 
 安装脚本会:
 
@@ -91,7 +108,7 @@ easycard start
 easycard stop
 easycard restart
 easycard update          # 更新到最近公开版本
-easycard update 1.1.0-rc.2
+easycard update 1.1.0-rc.10
 easycard port             # 查看当前监听端口
 easycard port 9090        # 安全更换监听端口
 easycard logs 200
@@ -107,12 +124,12 @@ easycard logs -f
 ```bash
 sudo easycard update-all
 # 或为整个批次指定同一版本
-sudo easycard update-all 1.1.0-rc.9
+sudo easycard update-all 1.1.0-rc.10
 ```
 
 菜单入口：`sudo easycard` → **11) 更新所有实例**；多实例选择页也可输入 **a** 直接进入。未指定版本时仅查询一次最近公开版本，整个批次使用同一目标版本和安装器。显示已完成、失败和未处理实例；成功实例不会自动回退，失败实例沿用单实例更新器的回滚流程。批次互斥锁阻止重复批量执行，每次实例更新仍使用原安装锁。
 
-rc.7 或更早的管理工具需先更新一套，获得新共享命令后再更新其余实例：先用 `sudo easycard instances` 查看名称，执行 `sudo easycard --instance 实际名称 update 1.1.0-rc.9`，随后执行 `sudo easycard update-all 1.1.0-rc.9`。这会再次检查/更新已升级的实例。批量更新不能和 `--instance` 同时使用。
+rc.7 或更早的管理工具需先更新一套，获得新共享命令后再更新其余实例：先用 `sudo easycard instances` 查看名称，执行 `sudo easycard --instance 实际名称 update 1.1.0-rc.10`，随后执行 `sudo easycard update-all 1.1.0-rc.10`。这会再次检查/更新已升级的实例。批量更新不能和 `--instance` 同时使用。
 
 只有一个实例时，`easycard`、`easycard restart`、`easycard update` 等原命令保持不变。新增实例后，交互命令先选择实例；脚本、计划任务等非交互调用必须使用 `--instance`（或 `-i`）。`easycard instances` 列出实例名、当前端口和目录。
 
@@ -180,8 +197,8 @@ sudo systemctl daemon-reload
 ## Linux 手动安装
 
 ```bash
-# 以 1.1.0-rc.2 / amd64 为例
-VER=1.1.0-rc.2
+# 以 1.1.0-rc.10 / amd64 为例
+VER=1.1.0-rc.10
 ARCH=amd64   # 或 arm64
 curl -fLO "https://github.com/ecard8/EasyCard/releases/download/v${VER}/EasyCard-${VER}-linux-${ARCH}.tar.gz"
 curl -fLO "https://github.com/ecard8/EasyCard/releases/download/v${VER}/SHA256SUMS"
@@ -342,7 +359,7 @@ shasum -a 256 EasyCard-<版本>-darwin-<架构>.tar.gz
 PowerShell:
 
 ```powershell
-Get-FileHash .\EasyCard-1.1.0-rc.2-windows-amd64.zip -Algorithm SHA256
+Get-FileHash .\EasyCard-1.1.0-rc.10-windows-amd64.zip -Algorithm SHA256
 ```
 
 ---
