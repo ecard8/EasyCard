@@ -19,7 +19,7 @@ Every release includes `SHA256SUMS`. Verify the archive before execution.
 
 The `EasyCard-*` archive names, `ecard8/EasyCard` repository path, and `easycard` service user/directory remain stable compatibility identifiers for the existing release and upgrade chain. User-facing product branding is EasyCard.
 
-> **Release-candidate upgrade deadline:** Each new version provides six calendar months of customer-page access from its release date, clamped to month-end when needed. `v1.1.0-rc.15` is dated `2026-11-11` and remains available through `2027-05-11` in the configured site timezone, requiring an upgrade from `2027-05-12 00:00`. Reinstalling or restarting does not extend the deadline. Administration, `easycard update`, health checks, APIs, and payment callbacks remain available.
+> **Release-candidate upgrade deadline:** Each new version provides six calendar months of customer-page access from its release date, clamped to month-end when needed. `v1.1.0-rc.16` is dated `2026-11-11` and remains available through `2027-05-11` in the configured site timezone, requiring an upgrade from `2027-05-12 00:00`. Reinstalling or restarting does not extend the deadline. Administration, `easycard update`, health checks, APIs, and payment callbacks remain available.
 
 ## Email settings (seven independent providers)
 
@@ -52,6 +52,8 @@ Verification-code generation, rate limits, and consumption remain in the busines
 
 In **System Settings → Registration & Sign-in**, control email and phone registration separately. Both default to enabled, including missing settings on upgrades. The global registration switch controls all new registrations. Disabling a method also blocks its registration-code requests; existing users can still sign in, bind contacts, and recover passwords.
 
+From rc.16, existing product limits apply per order across that product's options, without deducting historical purchases. Ordinary direct, cart, and OpenAPI purchases allow one active unpaid order per account or guest email. Five cancelled or expired unpaid orders within 30 minutes trigger a 10-minute cooldown from the latest event. Idempotent retries recover the existing order; top-ups, internal renewals/upgrades, and marked upstream reservations are excluded. No database migration or new environment variable is required. Different guest emails are separate identities.
+
 From rc.15, checkout and cart pages disable balance payment when funds are insufficient. Quantity, variant, and coupon changes update eligibility; an exact balance remains usable. Checkout is disabled when no payment method is available.
 
 From rc.14, verification-code inputs on registration and password recovery pages shrink to the available space while send buttons keep their text on one line.
@@ -78,7 +80,7 @@ curl -fsSLO https://raw.githubusercontent.com/ecard8/EasyCard/main/install.sh
 sudo bash install.sh --dir /opt/easycard --port 18765 -y
 ```
 
-With no `--version`, the installer selects the highest semantic version across public GitHub Release pages, including prereleases, independently of list order or publication time. Use `--version 1.1.0-rc.15` only when a reproducible deployment, rollback, or controlled acceptance run must pin an exact version.
+With no `--version`, the installer selects the highest semantic version across public GitHub Release pages, including prereleases, independently of list order or publication time. Use `--version 1.1.0-rc.16` only when a reproducible deployment, rollback, or controlled acceptance run must pin an exact version.
 
 The installer selects amd64/arm64, downloads the matching archive, verifies SHA-256 and candidate `-version`, creates a least-privilege `easycard` service account and hardened systemd unit, preserves existing configuration/data, then verifies the new process and database. If the new process does not become healthy within 30 seconds, it restores the previous binary.
 
@@ -92,7 +94,7 @@ easycard start
 easycard stop
 easycard restart
 easycard update
-easycard update 1.1.0-rc.15
+easycard update 1.1.0-rc.16
 easycard port
 easycard port 9090
 easycard logs 200
@@ -130,17 +132,17 @@ Metadata is stored in `/etc/easycard/instances/NAME.conf`. Legacy `/etc/easycard
 
 For first-time use of the new installer, choose a package with the new manager. If neither the candidate nor the installed manager supports instances, installation stops before modifying services. Once installed, the new manager can remain in place when using compatible older application packages.
 
-From rc.8, `sudo easycard update-all [VERSION]` updates every registered instance in name order, stopping immediately on the first failure. Use `sudo easycard update-all 1.1.0-rc.15` to pin the entire batch. The menu adds option **11) Update all instances**, and the multiple-instance selector offers **a**. Without a version, the highest public semantic version is resolved once; the same version and installer are used throughout. The result lists completed, failed, and unprocessed instances. Completed instances stay updated; a failing instance retains the existing updater's rollback behavior. A batch lock prevents overlapping batches, while each update retains the installation lock. Do not combine `update-all` with `--instance`.
+From rc.8, `sudo easycard update-all [VERSION]` updates every registered instance in name order, stopping immediately on the first failure. Use `sudo easycard update-all 1.1.0-rc.16` to pin the entire batch. The menu adds option **11) Update all instances**, and the multiple-instance selector offers **a**. Without a version, the highest public semantic version is resolved once; the same version and installer are used throughout. The result lists completed, failed, and unprocessed instances. Completed instances stay updated; a failing instance retains the existing updater's rollback behavior. A batch lock prevents overlapping batches, while each update retains the installation lock. Do not combine `update-all` with `--instance`.
 
-With an older manager, first pin rc.15 for one instance to install the shared manager with corrected version selection, then update every instance automatically:
+With an older manager, first pin rc.16 for one instance to install the shared manager with corrected version selection, then update every instance automatically:
 
 ```bash
-sudo easycard update 1.1.0-rc.15
+sudo easycard update 1.1.0-rc.16
 # Select one instance when prompted, or explicitly use --instance NAME
 sudo easycard update-all
 ```
 
-The new manager compares semantic versions: `1.1.0-rc.15` ranks above `1.1.0-rc.10`, and `1.1.0` ranks above both. Older managers that already support `update-all` (rc.8 onward) can instead run `sudo easycard update-all 1.1.0-rc.15` directly to bypass the old automatic selector. On rc.7 or earlier, update one instance first to obtain the batch command. The batch also checks/updates that already upgraded instance. Do not combine `update-all` with `--instance`.
+The new manager compares semantic versions: `1.1.0-rc.16` ranks above `1.1.0-rc.10`, and `1.1.0` ranks above both. Older managers that already support `update-all` (rc.8 onward) can instead run `sudo easycard update-all 1.1.0-rc.16` directly to bypass the old automatic selector. On rc.7 or earlier, update one instance first to obtain the batch command. The batch also checks/updates that already upgraded instance. Do not combine `update-all` with `--instance`.
 
 From rc.7, run `sudo easycard remove` to select an instance, or choose it in `sudo easycard` and select **10) Remove the current instance**. The default removes only its service and registration while keeping its directory. You may explicitly choose permanent directory deletion; type the instance name to confirm. Non-interactive examples:
 
@@ -166,7 +168,7 @@ On an uninitialized instance still using default port 18765, a collision selects
 ### Manual installation
 
 ```bash
-VER=1.1.0-rc.15
+VER=1.1.0-rc.16
 ARCH=amd64 # or arm64
 curl -fLO "https://github.com/ecard8/EasyCard/releases/download/v${VER}/EasyCard-${VER}-linux-${ARCH}.tar.gz"
 curl -fLO "https://github.com/ecard8/EasyCard/releases/download/v${VER}/SHA256SUMS"
@@ -242,7 +244,7 @@ Terminate TLS at the reverse proxy, keep the backend listener private, and confi
 PowerShell verification:
 
 ```powershell
-Get-FileHash .\EasyCard-1.1.0-rc.15-windows-amd64.zip -Algorithm SHA256
+Get-FileHash .\EasyCard-1.1.0-rc.16-windows-amd64.zip -Algorithm SHA256
 ```
 
 ## macOS
