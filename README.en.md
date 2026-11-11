@@ -19,19 +19,34 @@ Every release includes `SHA256SUMS`. Verify the archive before execution.
 
 The `EasyCard-*` archive names, `ecard8/EasyCard` repository path, and `easycard` service user/directory remain stable compatibility identifiers for the existing release and upgrade chain. User-facing product branding is EasyCard.
 
-> **Release-candidate upgrade deadline:** Each new version provides six calendar months of customer-page access from its release date, clamped to month-end when needed. `v1.1.0-rc.11` is dated `2026-11-11` and remains available through `2027-05-11` in the configured site timezone, requiring an upgrade from `2027-05-12 00:00`. Reinstalling or restarting does not extend the deadline. Administration, `easycard update`, health checks, APIs, and payment callbacks remain available.
+> **Release-candidate upgrade deadline:** Each new version provides six calendar months of customer-page access from its release date, clamped to month-end when needed. `v1.1.0-rc.12` is dated `2026-11-11` and remains available through `2027-05-11` in the configured site timezone, requiring an upgrade from `2027-05-12 00:00`. Reinstalling or restarting does not extend the deadline. Administration, `easycard update`, health checks, APIs, and payment callbacks remain available.
 
-## Email settings (SMTP / Resend)
+## Email settings (seven independent providers)
 
-Official Resend links: [create an account](https://resend.com/signup), [create or manage API keys](https://resend.com/api-keys), and [add and verify sending domains](https://resend.com/domains). The last two require dashboard sign-in; enter the key only in this instance's administration settings.
+rc.12 adds five providers while retaining Resend and custom SMTP. Open **System Settings → Email** in each instance to save, activate, and test profiles separately. No environment variables or restart are required.
 
-SMTP remains the default and keeps existing settings. To use Resend, open **System Settings → Email** in each instance, select **Resend**, enter an API key and sender (for example, `EasyCard <noreply@auth.example.com>`), and save. No environment variables or restart are required. The key is encrypted in that instance's database and returned as `********`; blank or unchanged masked input preserves it, while a new value rotates it.
+| Provider | Transport and credentials |
+| --- | --- |
+| Custom SMTP | User-supplied host, port, encryption, username, and password |
+| Resend | HTTP API key; [sign up](https://resend.com/signup), [API keys](https://resend.com/api-keys), [verify domains](https://resend.com/domains) |
+| Mailjet | SMTP; the encrypted API Key field supplies the username, and the password field holds the Secret Key |
+| SMTP2GO | Username and password created under SMTP Users |
+| Cloudflare Email Sending | Sending API token and account ID; Email Routing alone is insufficient |
+| Alibaba Cloud DirectMail | Region-specific sender address and SMTP password |
+| Tencent Cloud SES | Region-specific sender address and SMTP password |
 
-1. Add a sending domain in Resend and complete verification using the exact DNS records shown in its dashboard. Use a sender on that domain and preserve existing inbound MX records. See [Resend official Cloudflare guide](https://resend.com/docs/guides/dns/cloudflare) for domain and DNS steps.
-2. Save the settings, then send a test email from administration to a mailbox you can inspect. A successful request means provider acceptance; check the inbox and spam folder to confirm actual receipt.
-3. Explicitly accept the mail channel in the administration integration acceptance controls before enabling verification or business mail features. Changing the provider, key, or sender requires a new test and acceptance. Configure and accept each instance separately.
+Each provider supports a From address, sender name, and optional Reply-to. Preset SMTP endpoints and encryption are managed by the application; regional providers expose a region selector. The panel links to official documentation. Verify the sending domain or address in the provider dashboard before testing, follow its actual DNS requirements, and preserve existing inbound MX records.
 
-Resend verification messages include the site name, code, actual lifetime in minutes, and an ignore-if-unrequested notice. Existing expiry, single-use, and rate-limit rules remain; sending never marks a user's email as verified. SMTP custom templates are preserved. Current live delivery evidence is limited to a Gmail test confirmed by the user, not production domain, DNS, or other mailbox acceptance.
+1. **Save profile** changes only that provider's draft. Switching providers restores their separate settings without changing the active channel.
+2. **Activate saved profile** selects the saved snapshot and turns sending on. Effective configuration changes revoke previous acceptance; ordinary draft edits do not affect the active snapshot.
+3. Enter a test recipient you can inspect and send the fixed test message. Provider acceptance is not delivery. Check the inbox and spam folder, then **record acceptance** in the existing card after actual receipt before enabling verification or business mail features.
+4. Inactive drafts and globally disabled sending may be tested for preflight, but these tests do not establish active-channel acceptance. Activate and test again. Configure and accept each instance separately.
+
+The first successful mail-settings write (save, activation, or global-switch change) migrates legacy SMTP/Resend profiles into encrypted storage and removes legacy credential copies. Reads expose only configured/not-configured flags, never credentials or masked credential values. Blank input retains a credential, new input replaces it, and explicitly selecting clear and saving removes it. Clearing active credentials disables sending and revokes acceptance. Turning sending off retains profiles but disables email and dependent features; after re-enabling, test, record acceptance, and re-enable business features as needed.
+
+Verification-code generation, rate limits, and consumption remain in the business workflow; sending never marks an email verified. HTTP/SMTP sending uses bounded timeouts without automatic retries or fallback. Check provider records before repeating a timed-out or otherwise uncertain send.
+
+**Acceptance boundary:** Automated checks, protocol doubles, and builds passed; live delivery across the seven providers has not been verified in this iteration. The in-app browser URL policy blocked local page acceptance. Verify actual deployed-page operations, production sending domains, and real receipt separately. A previous single Resend Gmail receipt does not establish acceptance for all current providers.
 
 ## Registration methods and email-only registration
 
@@ -57,7 +72,7 @@ curl -fsSLO https://raw.githubusercontent.com/ecard8/EasyCard/main/install.sh
 sudo bash install.sh --dir /opt/easycard --port 18765 -y
 ```
 
-With no `--version`, the installer selects the highest semantic version across public GitHub Release pages, including prereleases, independently of list order or publication time. Use `--version 1.1.0-rc.11` only when a reproducible deployment, rollback, or controlled acceptance run must pin an exact version.
+With no `--version`, the installer selects the highest semantic version across public GitHub Release pages, including prereleases, independently of list order or publication time. Use `--version 1.1.0-rc.12` only when a reproducible deployment, rollback, or controlled acceptance run must pin an exact version.
 
 The installer selects amd64/arm64, downloads the matching archive, verifies SHA-256 and candidate `-version`, creates a least-privilege `easycard` service account and hardened systemd unit, preserves existing configuration/data, then verifies the new process and database. If the new process does not become healthy within 30 seconds, it restores the previous binary.
 
@@ -71,7 +86,7 @@ easycard start
 easycard stop
 easycard restart
 easycard update
-easycard update 1.1.0-rc.11
+easycard update 1.1.0-rc.12
 easycard port
 easycard port 9090
 easycard logs 200
@@ -109,17 +124,17 @@ Metadata is stored in `/etc/easycard/instances/NAME.conf`. Legacy `/etc/easycard
 
 For first-time use of the new installer, choose a package with the new manager. If neither the candidate nor the installed manager supports instances, installation stops before modifying services. Once installed, the new manager can remain in place when using compatible older application packages.
 
-From rc.8, `sudo easycard update-all [VERSION]` updates every registered instance in name order, stopping immediately on the first failure. Use `sudo easycard update-all 1.1.0-rc.11` to pin the entire batch. The menu adds option **11) Update all instances**, and the multiple-instance selector offers **a**. Without a version, the highest public semantic version is resolved once; the same version and installer are used throughout. The result lists completed, failed, and unprocessed instances. Completed instances stay updated; a failing instance retains the existing updater's rollback behavior. A batch lock prevents overlapping batches, while each update retains the installation lock. Do not combine `update-all` with `--instance`.
+From rc.8, `sudo easycard update-all [VERSION]` updates every registered instance in name order, stopping immediately on the first failure. Use `sudo easycard update-all 1.1.0-rc.12` to pin the entire batch. The menu adds option **11) Update all instances**, and the multiple-instance selector offers **a**. Without a version, the highest public semantic version is resolved once; the same version and installer are used throughout. The result lists completed, failed, and unprocessed instances. Completed instances stay updated; a failing instance retains the existing updater's rollback behavior. A batch lock prevents overlapping batches, while each update retains the installation lock. Do not combine `update-all` with `--instance`.
 
-With an older manager, first pin rc.11 for one instance to install the shared manager with corrected version selection, then update every instance automatically:
+With an older manager, first pin rc.12 for one instance to install the shared manager with corrected version selection, then update every instance automatically:
 
 ```bash
-sudo easycard update 1.1.0-rc.11
+sudo easycard update 1.1.0-rc.12
 # Select one instance when prompted, or explicitly use --instance NAME
 sudo easycard update-all
 ```
 
-The new manager compares semantic versions: `1.1.0-rc.11` ranks above `1.1.0-rc.10`, and `1.1.0` ranks above both. Older managers that already support `update-all` (rc.8 onward) can instead run `sudo easycard update-all 1.1.0-rc.11` directly to bypass the old automatic selector. On rc.7 or earlier, update one instance first to obtain the batch command. The batch also checks/updates that already upgraded instance. Do not combine `update-all` with `--instance`.
+The new manager compares semantic versions: `1.1.0-rc.12` ranks above `1.1.0-rc.10`, and `1.1.0` ranks above both. Older managers that already support `update-all` (rc.8 onward) can instead run `sudo easycard update-all 1.1.0-rc.12` directly to bypass the old automatic selector. On rc.7 or earlier, update one instance first to obtain the batch command. The batch also checks/updates that already upgraded instance. Do not combine `update-all` with `--instance`.
 
 From rc.7, run `sudo easycard remove` to select an instance, or choose it in `sudo easycard` and select **10) Remove the current instance**. The default removes only its service and registration while keeping its directory. You may explicitly choose permanent directory deletion; type the instance name to confirm. Non-interactive examples:
 
@@ -145,7 +160,7 @@ On an uninitialized instance still using default port 18765, a collision selects
 ### Manual installation
 
 ```bash
-VER=1.1.0-rc.11
+VER=1.1.0-rc.12
 ARCH=amd64 # or arm64
 curl -fLO "https://github.com/ecard8/EasyCard/releases/download/v${VER}/EasyCard-${VER}-linux-${ARCH}.tar.gz"
 curl -fLO "https://github.com/ecard8/EasyCard/releases/download/v${VER}/SHA256SUMS"
@@ -221,7 +236,7 @@ Terminate TLS at the reverse proxy, keep the backend listener private, and confi
 PowerShell verification:
 
 ```powershell
-Get-FileHash .\EasyCard-1.1.0-rc.11-windows-amd64.zip -Algorithm SHA256
+Get-FileHash .\EasyCard-1.1.0-rc.12-windows-amd64.zip -Algorithm SHA256
 ```
 
 ## macOS

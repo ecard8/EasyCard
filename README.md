@@ -24,21 +24,36 @@ EasyCard 易卡数字平台是一套数字商品智能交易与自动交付平�
 
 `EasyCard-*` 归档名、`ecard8/EasyCard` 仓库路径、`easycard` 服务用户/目录是现有发行与升级链路的兼容标识，品牌升级阶段继续保留；产品展示名称统一为 EasyCard。
 
-> **候选版升级期限：**每个新版本从发布日期起提供六个自然月的客户端网页使用期，目标月份无对应日期时取月末。`v1.1.0-rc.11` 发布于 `2026-11-11`，可使用至站点时区 `2027-05-11`；从 `2027-05-12 00:00` 起商城与客户中心要求升级。重新安装或重启不延长期限；管理后台、`easycard update`、健康检查、API 与支付回调继续可用。
+> **候选版升级期限：**每个新版本从发布日期起提供六个自然月的客户端网页使用期，目标月份无对应日期时取月末。`v1.1.0-rc.12` 发布于 `2026-11-11`，可使用至站点时区 `2027-05-11`；从 `2027-05-12 00:00` 起商城与客户中心要求升级。重新安装或重启不延长期限；管理后台、`easycard update`、健康检查、API 与支付回调继续可用。
 
 ---
 
-## 邮件配置（SMTP / Resend）
+## 邮件配置（七个独立通道）
 
-Resend 官方入口：[注册账号](https://resend.com/signup)、[创建或管理 API Key](https://resend.com/api-keys)、[添加及验证发信域名](https://resend.com/domains)。后两项需登录 Resend 控制台；密钥仅填入本实例后台。
+rc.12 新增五家邮件服务商，保留已有 Resend 和自定义 SMTP。在每个实例的 **系统设置 → 邮件配置** 中分别保存、启用和测试；无需环境变量或重启。
 
-SMTP 保持默认，已有配置可继续使用。使用 Resend 时，在每个实例的 **系统设置 → 邮件配置** 中选择 **Resend**，填写 API Key 和发件人（如 `EasyCard <noreply@auth.example.com>`）并保存；无需设置环境变量或重启。密钥加密保存在该实例数据库中，重新读取只显示 `********`；留空或保留掩码会保留原密钥，输入新值才轮换。
+| 通道 | 发送方式与凭据 |
+| --- | --- |
+| 自定义 SMTP | 自行填写服务器、端口、加密方式、用户名和密码 |
+| Resend | HTTP API Key；[注册](https://resend.com/signup)、[API Key](https://resend.com/api-keys)、[域名验证](https://resend.com/domains) |
+| Mailjet | SMTP；加密的 API Key 字段作为用户名，密码字段填 Secret Key |
+| SMTP2GO | SMTP Users 中创建的用户名和密码 |
+| Cloudflare Email Sending | 发信 API Token 和账户 ID；仅开通 Email Routing 不足以发信 |
+| 阿里云邮件推送 | 对应区域的发信地址与 SMTP 密码 |
+| 腾讯云 SES | 对应区域的发信地址与 SMTP 密码 |
 
-1. 在 Resend 添加发信域名，按其控制台给出的实际 DNS 记录完成域名验证，再使用该域名的发件地址。保留已有收件服务的 MX 配置；域名与 DNS 操作详见 [Resend 官方 Cloudflare 指南](https://resend.com/docs/guides/dns/cloudflare)。
-2. 保存配置后，在后台发送测试邮件到自己可检查的邮箱。请求成功仅表示服务商接受，仍需检查收件箱和垃圾箱，确认实际收到。
-3. 在后台集成验收中明确确认邮件通道验收，再启用所需验证码或业务邮件功能。切换通道、修改密钥或发件人后须重新测试与验收；多实例分别配置、分别验收。
+每个通道均可设置发件邮箱、发件人名称和可选回复邮箱；预设 SMTP 地址和加密方式由程序管理，需要区域的通道提供区域选项。面板附各家官方文档。测试前按服务商控制台验证发信域名或邮箱；使用实际要求的 DNS 记录，保留原有收件服务的 MX 配置。
 
-Resend 验证码正文包含站名、验证码、实际有效分钟数及非本人操作忽略提示；沿用原有过期、单次消费和限流规则，发信本身不会将用户邮箱标记为已验证。SMTP 自定义模板保留。当前真实收件证据仅为用户确认的 Gmail 测试，不代表正式域名、生产 DNS 和其他邮箱已通过验收。
+1. **保存配置**只更新该通道草稿，切换服务商可恢复各自配置，不改变当前活动通道。
+2. **启用已保存配置**将草稿作为活动快照并开启邮件总开关。有效配置变化会撤销旧验收；普通草稿修改不会影响正在使用的快照。
+3. 填写自己可检查的测试收件邮箱，发送固定测试内容。服务商接受请求不等于送达；检查收件箱和垃圾箱，确认实际收到后，在原有验收卡中**记录验收**，再启用所需验证码或业务邮件功能。
+4. 未启用的草稿和总开关关闭时也可预检测试，但不会建立活动通道验收；启用后需重新测试。多实例须分别配置和验收。
+
+首次成功写入邮件设置（保存、启用或更改总开关）时，旧 SMTP/Resend 配置迁移至新加密存储，随后清除旧密钥副本。读取只返回“已配置/未配置”，不会回传密钥或掩码值；留空保留、输入新值替换，勾选明确的清除选项后保存才删除。清除当前通道密钥会立即停用邮件并撤销验收。总开关关闭保留配置，但停用邮件及依赖功能；重新开启后须完成测试、验收并按需开启业务功能。
+
+验证码仍由原业务流程生成、限流和消费，邮件发送不会将邮箱直接标记为已验证。HTTP/SMTP 发送设置有限超时，不自动重试或回退；超时等不确定结果须先核对服务商记录，避免重复发送。
+
+**本轮验收边界：**自动化、协议替身与构建检查通过，尚未验证七通道真实投递。内置浏览器 URL 策略阻止本地页面验收；实际部署后的页面操作、正式发信域名与真实收件仍须验证。此前单次 Resend Gmail 收件记录不能替代本轮所有通道的验收。
 
 ## 注册方式与仅邮箱注册
 
@@ -71,7 +86,7 @@ if [ -f /usr/bin/curl ];then curl -sSO https://raw.githubusercontent.com/ecard8/
 bash install.sh --dir /opt/easycard --port 18765 -y
 ```
 
-需要复现、回滚或受控验收时，可额外使用 `--version 1.1.0-rc.11` 固定版本。
+需要复现、回滚或受控验收时，可额外使用 `--version 1.1.0-rc.12` 固定版本。
 
 安装脚本会:
 
@@ -108,7 +123,7 @@ easycard start
 easycard stop
 easycard restart
 easycard update          # 更新到公开 Release 中语义版本最高的版本
-easycard update 1.1.0-rc.11
+easycard update 1.1.0-rc.12
 easycard port             # 查看当前监听端口
 easycard port 9090        # 安全更换监听端口
 easycard logs 200
@@ -124,20 +139,20 @@ easycard logs -f
 ```bash
 sudo easycard update-all
 # 或为整个批次指定同一版本
-sudo easycard update-all 1.1.0-rc.11
+sudo easycard update-all 1.1.0-rc.12
 ```
 
 菜单入口：`sudo easycard` → **11) 更新所有实例**；多实例选择页也可输入 **a** 直接进入。未指定版本时仅解析一次公开 Release 中语义版本最高的版本，整个批次使用同一目标版本和安装器。显示已完成、失败和未处理实例；成功实例不会自动回退，失败实例沿用单实例更新器的回滚流程。批次互斥锁阻止重复批量执行，每次实例更新仍使用原安装锁。
 
-旧管理器先明确指定 rc.11 更新一套，以安装修正版本选择的共享管理器，再自动更新全部实例：
+旧管理器先明确指定 rc.12 更新一套，以安装修正版本选择的共享管理器，再自动更新全部实例：
 
 ```bash
-sudo easycard update 1.1.0-rc.11
+sudo easycard update 1.1.0-rc.12
 # 多实例时按提示选择一套；也可用 --instance 实际名称 明确指定
 sudo easycard update-all
 ```
 
-新版管理器按语义版本比较候选版与正式版，例如 `1.1.0-rc.11` 高于 `1.1.0-rc.10`，`1.1.0` 高于两者。已支持 `update-all` 的旧管理器（rc.8 起）也可直接运行 `sudo easycard update-all 1.1.0-rc.11`，绕过旧的自动版本选择；rc.7 或更早版本须先更新一套获得批量命令。批次会再次检查/更新已升级实例。`update-all` 不能和 `--instance` 同时使用。
+新版管理器按语义版本比较候选版与正式版，例如 `1.1.0-rc.12` 高于 `1.1.0-rc.10`，`1.1.0` 高于两者。已支持 `update-all` 的旧管理器（rc.8 起）也可直接运行 `sudo easycard update-all 1.1.0-rc.12`，绕过旧的自动版本选择；rc.7 或更早版本须先更新一套获得批量命令。批次会再次检查/更新已升级实例。`update-all` 不能和 `--instance` 同时使用。
 
 只有一个实例时，`easycard`、`easycard restart`、`easycard update` 等原命令保持不变。新增实例后，交互命令先选择实例；脚本、计划任务等非交互调用必须使用 `--instance`（或 `-i`）。`easycard instances` 列出实例名、当前端口和目录。
 
@@ -205,8 +220,8 @@ sudo systemctl daemon-reload
 ## Linux 手动安装
 
 ```bash
-# 以 1.1.0-rc.11 / amd64 为例
-VER=1.1.0-rc.11
+# 以 1.1.0-rc.12 / amd64 为例
+VER=1.1.0-rc.12
 ARCH=amd64   # 或 arm64
 curl -fLO "https://github.com/ecard8/EasyCard/releases/download/v${VER}/EasyCard-${VER}-linux-${ARCH}.tar.gz"
 curl -fLO "https://github.com/ecard8/EasyCard/releases/download/v${VER}/SHA256SUMS"
@@ -367,7 +382,7 @@ shasum -a 256 EasyCard-<版本>-darwin-<架构>.tar.gz
 PowerShell:
 
 ```powershell
-Get-FileHash .\EasyCard-1.1.0-rc.11-windows-amd64.zip -Algorithm SHA256
+Get-FileHash .\EasyCard-1.1.0-rc.12-windows-amd64.zip -Algorithm SHA256
 ```
 
 ---
