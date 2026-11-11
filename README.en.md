@@ -19,7 +19,7 @@ Every release includes `SHA256SUMS`. Verify the archive before execution.
 
 The `EasyCard-*` archive names, `ecard8/EasyCard` repository path, and `easycard` service user/directory remain stable compatibility identifiers for the existing release and upgrade chain. User-facing product branding is EasyCard.
 
-> **Release-candidate upgrade deadline:** Each new version provides six calendar months of customer-page access from its release date, clamped to month-end when needed. `v1.1.0-rc.7` is dated `2026-11-07` and remains available through `2027-05-07` in the configured site timezone, requiring an upgrade from `2027-05-08 00:00`. Reinstalling or restarting does not extend the deadline. Administration, `easycard update`, health checks, APIs, and payment callbacks remain available.
+> **Release-candidate upgrade deadline:** Each new version provides six calendar months of customer-page access from its release date, clamped to month-end when needed. `v1.1.0-rc.8` is dated `2026-11-11` and remains available through `2027-05-11` in the configured site timezone, requiring an upgrade from `2027-05-12 00:00`. Reinstalling or restarting does not extend the deadline. Administration, `easycard update`, health checks, APIs, and payment callbacks remain available.
 
 ## Linux installer
 
@@ -81,6 +81,10 @@ The instance name is its systemd service name; the installer's `--service` and `
 Metadata is stored in `/etc/easycard/instances/NAME.conf`. Legacy `/etc/easycard/manager.conf` is imported and retained without changing its default target when another instance is added. Each instance keeps its own database, configuration, keys, uploads, and backups; configure each domain, `base_url`, and payment callback separately. Updates, port changes, logs, and failed-upgrade rollback target only the selected instance. Installation, updates, and port changes share a lock. Older application packages do not downgrade an installed multi-instance manager. Binary rollback does not roll back database migrations.
 
 For first-time use of the new installer, choose a package with the new manager. If neither the candidate nor the installed manager supports instances, installation stops before modifying services. Once installed, the new manager can remain in place when using compatible older application packages.
+
+From rc.8, `sudo easycard update-all [VERSION]` updates every registered instance in name order, stopping immediately on the first failure. Use `sudo easycard update-all 1.1.0-rc.8` to pin the entire batch. The menu adds option **11) Update all instances**, and the multiple-instance selector offers **a**. Without a version, the latest public release is resolved once; the same version and installer are used throughout. The result lists completed, failed, and unprocessed instances. Completed instances stay updated; a failing instance retains the existing updater's rollback behavior. A batch lock prevents overlapping batches, while each update retains the installation lock. Do not combine `update-all` with `--instance`.
+
+To bootstrap from rc.7 or earlier, run `sudo easycard instances`, update one actual instance using `sudo easycard --instance NAME update 1.1.0-rc.8`, then run `sudo easycard update-all 1.1.0-rc.8`. The first update installs the shared command; the batch also checks/updates the instance that was already upgraded.
 
 From rc.7, run `sudo easycard remove` to select an instance, or choose it in `sudo easycard` and select **10) Remove the current instance**. The default removes only its service and registration while keeping its directory. You may explicitly choose permanent directory deletion; type the instance name to confirm. Non-interactive examples:
 

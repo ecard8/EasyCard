@@ -27,7 +27,7 @@ discover_instances() {
   for file in "$INSTANCES_DIR"/*.conf "$CONFIG_FILE"; do
     [[ -f "$file" ]] || continue
     [[ -r "$file" ]] || die "无法读取实例配置: $file"
-    name="$(SERVICE_NAME=''; source "$file"; printf '%s' "$SERVICE_NAME")"
+    name="$(SERVICE_NAME=''; source "$file" || exit 1; printf '%s' "$SERVICE_NAME")" || die "无法加载实例配置: $file"
     valid_instance_name "$name" || die "实例配置包含无效服务名: $file"
     if [[ "$file" != "$CONFIG_FILE" && "$(basename "$file")" != "$name.conf" ]]; then
       die "实例文件名与服务名不一致: $file"
@@ -43,7 +43,7 @@ discover_instances() {
 load_instance() {
   local index="$1"
   INSTALL_DIR=''; SERVICE_NAME=''; DEFAULT_PORT=''
-  source "${INSTANCE_FILES[$index]}"
+  source "${INSTANCE_FILES[$index]}" || die "无法加载实例配置: ${INSTANCE_FILES[$index]}"
   validate_config
 }
 
@@ -74,8 +74,10 @@ select_instance() {
   [[ -t 0 ]] || die "存在多个实例，请使用 easycard --instance <实例名> <命令>"
   for i in "${!INSTANCE_NAMES[@]}"; do printf '  %d) %s\n' "$((i + 1))" "${INSTANCE_NAMES[$i]}"; done
   [[ "$allow_install" != 1 ]] || printf '  n) 安装新实例\n'
+  [[ "$allow_install" != 1 ]] || printf '  a) 顺序更新全部实例（失败停止）\n'
   read -r -p '请选择实例编号（0 退出）: ' choice || exit 0
   if [[ "$allow_install" == 1 && "$choice" == n ]]; then install_instance; exit $?; fi
+  if [[ "$allow_install" == 1 && "$choice" == a ]]; then update_all_instances; exit $?; fi
   [[ "$choice" != 0 ]] || exit 0
   [[ "$choice" =~ ^[1-9][0-9]*$ && ${#choice} -le 6 ]] || die '无效实例编号'
   (( choice <= ${#INSTANCE_NAMES[@]} )) || die '无效实例编号'
@@ -133,6 +135,7 @@ EasyCard 易卡数字平台 Linux 管理工具
   easycard stop                    停止服务
   easycard restart                 重启服务
   easycard update [版本]           更新到最近公开版本，或指定版本
+  easycard update-all [版本]       按名称顺序更新全部实例，失败立即停止
   easycard port [新端口]           查看或更换监听端口
   easycard logs [行数]             查看最近日志（默认 100 行）
   easycard logs -f                 持续查看日志
@@ -503,6 +506,107 @@ remove_instance() (
   [[ "$mode" != --keep-data ]] || info "数据仍在 $directory；重新使用前请人工核对，安装器不会覆盖非空目录"
 )
 
+update_all_instances() {
+  need_root update-all
+  [[ $# -le 1 ]] || die '用法: easycard update-all [版本]'
+  local version="${1:-}" tmp='' installer metadata sorted name file i match child='' failure='批次准备' result
+  local -a batch_names=() snapshots=() completed=()
+  version="${version#v}"
+  [[ $# -eq 0 || -n "$version" ]] || die '显式版本号不能为空'
+  [[ -z "$version" || "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || die '版本号格式无效'
+  for name in systemctl realpath flock sort; do command -v "$name" >/dev/null 2>&1 || die "批量更新需要 $name"; done
+  # This lock only serializes batches. Each installer takes its own install.lock.
+  exec 8>"$(dirname "$CONFIG_FILE")/update-all.lock" || die '无法创建批量更新锁'
+  flock -n 8 || die '另一个批量更新正在执行，请稍后再试'
+  finish_batch() {
+    local status="$?" pending_name done_name seen
+    local -a pending=()
+    trap - EXIT HUP INT TERM
+    if [[ -n "$child" ]]; then
+      kill -TERM "$child" 2>/dev/null || true
+      wait "$child" 2>/dev/null || true
+    fi
+    if [[ -n "$tmp" ]] && ! rm -rf -- "$tmp"; then status=1; failure="${failure:-临时下载清理}"; fi
+    for pending_name in "${batch_names[@]}"; do
+      [[ "$pending_name" != "$failure" ]] || continue
+      seen=0
+      for done_name in "${completed[@]}"; do [[ "$pending_name" != "$done_name" ]] || seen=1; done
+      [[ "$seen" != 0 ]] || pending+=("$pending_name")
+    done
+    printf '\n批量更新结果\n完成: %s\n失败: %s\n未处理: %s\n' "${completed[*]:-无}" "${failure:-无}" "${pending[*]:-无}"
+    exit "$status"
+  }
+  trap finish_batch EXIT
+  trap 'warn "批量更新收到中断信号，停止后续实例"; exit 130' INT
+  trap 'warn "批量更新收到终止信号，停止后续实例"; exit 143' HUP TERM
+  batch_snapshot() (
+    local expected="$1" entry="$2" directory port
+    INSTALL_DIR=''; SERVICE_NAME=''; DEFAULT_PORT=''
+    [[ -f "$entry" && -r "$entry" ]] || { echo "实例登记不存在或不可读: $expected" >&2; exit 1; }
+    source "$entry" || exit 1
+    validate_config
+    [[ "$SERVICE_NAME" == "$expected" && "$INSTALL_DIR" != *[[:space:]]* ]] || { echo "实例登记身份无效: $expected" >&2; exit 1; }
+    directory="$(realpath -e -- "$INSTALL_DIR")" || exit 1
+    [[ -d "$directory" && -r "$directory/config.json" && -f "$SYSTEMD_UNIT_DIR/$expected.service" ]] || { echo "实例目录、配置或服务缺失: $expected" >&2; exit 1; }
+    port="$(sed -n 's/.*"listen"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$directory/config.json" | head -n1)" || exit 1
+    port="${port##*:}"
+    port="${port%]}"
+    [[ "$port" =~ ^[1-9][0-9]{0,4}$ ]] && (( port <= 65535 )) || { echo "实例监听端口无效: $expected" >&2; exit 1; }
+    printf '%s\t%s\n' "$directory" "$port"
+  )
+  discover_instances
+  [[ ${#INSTANCE_NAMES[@]} -gt 0 ]] || die '没有已登记实例，无法批量更新'
+  sorted="$(printf '%s\n' "${INSTANCE_NAMES[@]}" | LC_ALL=C sort)" || die '实例排序失败'
+  while IFS= read -r name; do batch_names+=("$name"); done <<< "$sorted"
+  # Freeze the whole target set before downloading or changing any instance.
+  for name in "${batch_names[@]}"; do
+    failure="$name"; match=''
+    for i in "${!INSTANCE_NAMES[@]}"; do [[ "${INSTANCE_NAMES[$i]}" != "$name" ]] || match="${INSTANCE_FILES[$i]}"; done
+    metadata="$(batch_snapshot "$name" "$match")" || die "实例 $name 配置检查失败，批次已停止"
+    snapshots+=("$metadata")
+  done
+  failure='批次下载'
+  tmp="$(mktemp -d)" || die '无法创建批量更新临时目录'
+  installer="$tmp/install.sh"
+  if [[ -z "$version" ]]; then
+    download "https://api.github.com/repos/${REPO}/releases?per_page=1" "$tmp/releases.json" || die '获取最新公开版本失败，未更新任何实例'
+    version="$(sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' "$tmp/releases.json" | head -n1)" || die '无法解析最新公开版本'
+    version="${version#v}"
+    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || die '最新公开版本无效，未更新任何实例'
+  fi
+  download "https://raw.githubusercontent.com/${REPO}/main/install.sh" "$installer" || die '下载官方安装器失败，未更新任何实例'
+  [[ -s "$installer" ]] || die '官方安装器为空，未更新任何实例'
+  bash -n "$installer" || die '官方安装器语法检查失败，未更新任何实例'
+  printf '批量目标版本: %s\n更新顺序: %s\n' "$version" "${batch_names[*]}"
+  for i in "${!batch_names[@]}"; do
+    name="${batch_names[$i]}"; failure="$name"
+    discover_instances
+    match=''
+    for file in "${!INSTANCE_NAMES[@]}"; do [[ "${INSTANCE_NAMES[$file]}" != "$name" ]] || match="${INSTANCE_FILES[$file]}"; done
+    [[ -n "$match" ]] || die "实例 $name 的登记已移除，批次已停止"
+    metadata="$(batch_snapshot "$name" "$match")" || die "实例 $name 配置检查失败，批次已停止"
+    [[ "$metadata" == "${snapshots[$i]}" ]] || die "实例 $name 的目录或端口已变化，批次已停止"
+    local directory port
+    IFS=$'\t' read -r directory port <<< "$metadata"
+    info "正在更新实例 $name 到 $version"
+    # A fresh Bash keeps installer errexit effective even when wait is conditional.
+    (
+      unset INSTALL_DIR SERVICE_NAME PORT VERSION EASYCARD_INSTALLER_LIBRARY
+      exec bash "$installer" -y --existing-instance --dir "$directory" --port "$port" --service "$name" --version "$version"
+    ) &
+    child="$!"
+    if wait "$child"; then result=0; else result=$?; fi
+    child=''
+    if [[ "$result" != 0 ]]; then
+      warn "实例 $name 更新失败（退出码 $result）；已完成实例保持当前版本，后续实例未处理"
+      exit "$result"
+    fi
+    completed+=("$name")
+  done
+  failure=''
+  exit 0
+}
+
 update_service() {
   need_root "$@"; need_systemd
   local version="${1:-}" tmp installer port result
@@ -545,8 +649,8 @@ menu() {
   [[ -t 0 ]] || { show_help; return; }
   printf '\n%sEasyCard 易卡数字平台%s\n' "$CYAN" "$NC"
   printf '实例: %s  目录: %s  端口: %s\n' "$SERVICE_NAME" "$INSTALL_DIR" "$(service_port)"
-  printf '  1) 查看状态\n  2) 启动服务\n  3) 停止服务\n  4) 重启服务\n  5) 在线更新\n  6) 查看日志\n  7) 查看版本\n  8) 更换监听端口\n  9) 安装新实例\n  10) 删除当前实例\n  0) 退出\n'
-  read -r -p "请选择 [0-10]: " choice
+  printf '  1) 查看状态\n  2) 启动服务\n  3) 停止服务\n  4) 重启服务\n  5) 在线更新\n  6) 查看日志\n  7) 查看版本\n  8) 更换监听端口\n  9) 安装新实例\n  10) 删除当前实例\n  11) 顺序更新全部实例（失败停止）\n  0) 退出\n'
+  read -r -p "请选择 [0-11]: " choice
   case "$choice" in
     1) show_status || true ;;
     2) start_service start ;;
@@ -558,6 +662,7 @@ menu() {
     8) read -r -p "请输入新端口（1-65535）: " new_port; change_port "$new_port" ;;
     9) install_instance ;;
     10) remove_instance "$SERVICE_NAME" ;;
+    11) update_all_instances ;;
     0) return ;;
     *) warn "无效选项" ;;
   esac
@@ -571,6 +676,10 @@ main() {
   fi
   command="${1:-}"
   case "$command" in help|--help|-help|-h) show_help; return ;; esac
+  if [[ "$command" == update-all ]]; then
+    [[ -z "$instance" ]] || die 'update-all 是全局操作，不能指定 --instance'
+    shift; update_all_instances "$@"; return
+  fi
   if [[ "$command" == remove || "$command" == uninstall ]]; then
     shift
     if [[ -n "$instance" ]]; then remove_instance "$instance" "$@"; else remove_instance "$@"; fi

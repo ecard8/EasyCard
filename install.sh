@@ -27,6 +27,7 @@ SYSTEMD_UNIT_DIR="${EASYCARD_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 VERSION="${VERSION:-}"
 ASSUME_YES=0
 NEW_INSTANCE_ONLY=0
+EXISTING_INSTANCE_ONLY=0
 CANDIDATE_DIR=""
 CANDIDATE_BIN=""
 CANDIDATE_MANAGER=""
@@ -56,6 +57,7 @@ EasyCard 易卡数字平台 Linux 安装脚本
   -s, --service NAME  systemd 服务名 (默认: easycard)
   -i, --instance NAME 实例名（与服务名相同；新实例默认目录 /opt/NAME）
       --new-instance 仅新装；同名实例或服务已存在时拒绝，不会转为更新
+      --existing-instance 仅更新已登记实例；登记被删除时拒绝重新安装
   -v, --version VER   可选：固定版本；省略则安装最新公开 Release（包含预发布）
   -y, --yes           非交互确认
   -h, --help          显示帮助
@@ -77,6 +79,7 @@ parse_args() {
       -v|--version) VERSION="$2"; shift 2 ;;
       -y|--yes) ASSUME_YES=1; shift ;;
       --new-instance) NEW_INSTANCE_ONLY=1; shift ;;
+      --existing-instance) EXISTING_INSTANCE_ONLY=1; shift ;;
       -h|--help) usage; exit 0 ;;
       -*) die "未知参数: $1" ;;
       *) VERSION="$1"; shift ;;
@@ -282,7 +285,7 @@ valid_instance_name() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9_.@-]*$ ]]; }
 # Read only root-managed, shell-escaped metadata, never application config/secrets.
 instance_metadata() (
   INSTALL_DIR=''; SERVICE_NAME=''; DEFAULT_PORT=''
-  source "$1"
+  source "$1" || die "无法加载实例配置: $1"
   valid_instance_name "$SERVICE_NAME" || die "无效实例配置: $1"
   [[ "$INSTALL_DIR" == /* && "$INSTALL_DIR" != *$'\n'* && "$INSTALL_DIR" != *$'\t'* ]] || die "无效实例目录: $1"
   [[ "$DEFAULT_PORT" =~ ^[0-9]+$ ]] || die "无效实例端口: $1"
@@ -291,6 +294,7 @@ instance_metadata() (
 )
 
 prepare_instance() {
+  [[ "$NEW_INSTANCE_ONLY" == 0 || "$EXISTING_INSTANCE_ONLY" == 0 ]] || die '不能同时要求仅新装和仅更新'
   valid_instance_name "$SERVICE_NAME" || die "systemd 服务名无效: $SERVICE_NAME"
   local file name directory configured metadata matched=0
   local -a records=()
@@ -312,6 +316,7 @@ prepare_instance() {
       if [[ "$PORT_EXPLICIT" == 0 ]]; then PORT="$configured"; fi
     fi
   done
+  [[ "$EXISTING_INSTANCE_ONLY" == 0 || "$matched" == 1 ]] || die "实例 $SERVICE_NAME 的登记不存在，拒绝将更新变为新装"
   if [[ "$NEW_INSTANCE_ONLY" == 1 && ( -e "$SYSTEMD_UNIT_DIR/$SERVICE_NAME.service" || -L "$SYSTEMD_UNIT_DIR/$SERVICE_NAME.service" ) ]]; then
     die "同名服务已存在，拒绝覆盖: $SERVICE_NAME"
   fi
@@ -322,6 +327,13 @@ prepare_instance() {
   INSTALL_DIR="$(realpath -m -- "$INSTALL_DIR")"
   case "$INSTALL_DIR" in /|/opt|/usr|/etc|/var|/home|/root|/tmp) die '不能将系统公共目录用作实例根目录' ;; esac
   [[ "$PORT" =~ ^[0-9]+$ ]] && (( PORT >= 1 && PORT <= 65535 )) || die '端口必须为 1-65535'
+  if [[ "$EXISTING_INSTANCE_ONLY" == 1 ]]; then
+    [[ -d "$INSTALL_DIR" && -r "$INSTALL_DIR/config.json" && -f "$SYSTEMD_UNIT_DIR/$SERVICE_NAME.service" ]] || die "实例 $SERVICE_NAME 的目录、配置或服务已移除，拒绝重新安装"
+    configured="$(sed -n 's/.*"listen"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$INSTALL_DIR/config.json" | head -n1)" || die '无法读取实例监听端口'
+    configured="${configured##*:}"; configured="${configured%]}"
+    [[ "$configured" =~ ^[1-9][0-9]{0,4}$ ]] && (( configured <= 65535 )) || die '实例监听端口无效，拒绝继续更新'
+    [[ "$PORT" == "$configured" ]] || die "实例 $SERVICE_NAME 的端口已变为 $configured，拒绝覆盖批次目标"
+  fi
   # Existing application configuration is preserved; --port must not imply a change.
   configured="$(service_port)"
   if [[ -f "$INSTALL_DIR/config.json" && "$PORT_EXPLICIT" == 1 && "$PORT" != "$configured" ]]; then
@@ -380,9 +392,10 @@ install_manager() {
   if grep -q 'EASYCARD_INSTANCES_DIR' "$CANDIDATE_MANAGER"; then
     if [[ -f "$MANAGER_BIN" ]] && {
       { grep -q '^install_instance()' "$MANAGER_BIN" && ! grep -q '^install_instance()' "$CANDIDATE_MANAGER"; } ||
-      { grep -q '^remove_instance()' "$MANAGER_BIN" && ! grep -q '^remove_instance()' "$CANDIDATE_MANAGER"; }
+      { grep -q '^remove_instance()' "$MANAGER_BIN" && ! grep -q '^remove_instance()' "$CANDIDATE_MANAGER"; } ||
+      { grep -q '^update_all_instances()' "$MANAGER_BIN" && ! grep -q '^update_all_instances()' "$CANDIDATE_MANAGER"; }
     }; then
-      info '保留已安装的新版管理工具及实例安装/删除入口'
+      info '保留已安装的新版管理工具及实例安装/删除/批量更新入口'
     else
       install -o root -g root -m 755 "$CANDIDATE_MANAGER" "$MANAGER_BIN"
     fi
