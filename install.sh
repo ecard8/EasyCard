@@ -125,14 +125,206 @@ http_get_stdout() {
   fi
 }
 
+# BEGIN EASYCARD RELEASE SELECTION
+# Capability marker: preserve this manager when installing older application packages.
+# Highest public SemVer, including prereleases; never trust GitHub list order.
+release_api_download() (
+  local url="$1" out="$2" request_pid='' timer_pid='' result
+  cleanup_release_request() {
+    if [[ -n "$timer_pid" ]]; then kill -TERM "$timer_pid" 2>/dev/null || true; wait "$timer_pid" 2>/dev/null || true; fi
+    if [[ -n "$request_pid" ]]; then kill -TERM "$request_pid" 2>/dev/null || true; wait "$request_pid" 2>/dev/null || true; fi
+  }
+  trap cleanup_release_request EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' HUP TERM
+  (
+    trap - EXIT HUP INT TERM
+    # Bash file-size limits also bound wget responses without Content-Length.
+    ulimit -f 8192 || exit 1
+    if command -v curl >/dev/null 2>&1; then
+      exec curl -fsSL --connect-timeout 10 --max-time 45 --max-filesize 8388608 --retry 2 -o "$out" "$url"
+    elif command -v wget >/dev/null 2>&1; then
+      exec wget -q --timeout=20 --tries=2 -O "$out" "$url"
+    else
+      echo '版本查询需要 curl 或 wget' >&2; exit 1
+    fi
+  ) &
+  request_pid=$!
+  # wget timeout is only an idle limit. Bound the entire request (and retries)
+  # without requiring an additional timeout utility; reap the timer on exit.
+  (
+    trap - EXIT HUP INT TERM
+    trap 'for sleeper in $(jobs -pr); do kill -TERM "$sleeper" 2>/dev/null || true; done; wait 2>/dev/null || true; exit 0' HUP INT TERM
+    sleep 50 &
+    wait "$!" || exit 1
+    kill -TERM "$request_pid" 2>/dev/null || true
+  ) &
+  timer_pid=$!
+  if wait "$request_pid"; then result=0; else result=$?; fi
+  request_pid=''
+  return "$result"
+)
+
+release_parse_page() {
+  local bytes
+  bytes="$(wc -c < "$1")" || return 1
+  [[ "$bytes" =~ ^[[:space:]]*[0-9]+[[:space:]]*$ ]] && (( bytes > 0 && bytes <= 8388608 )) || return 1
+  LC_ALL=C awk '
+    function bad() { print "Invalid GitHub releases JSON" > "/dev/stderr"; exit 1 }
+    function ws() { while (substr(data,pos,1) ~ /^[ \t\r\n]$/) pos++ }
+    function take(c) { ws(); if(substr(data,pos,1)!=c) bad(); pos++ }
+    function str( c,e,h,n,i,out) {
+      take("\""); out=""
+      while(pos<=length(data)) {
+        c=substr(data,pos++,1)
+        if(c=="\"") return out
+        if(c ~ /[[:cntrl:]]/) bad()
+        if(c!="\\") { out=out c; continue }
+        e=substr(data,pos++,1)
+        if(e=="\"" || e=="\\" || e=="/") out=out e
+        else if(e=="b") out=out sprintf("%c",8)
+        else if(e=="f") out=out sprintf("%c",12)
+        else if(e=="n") out=out "\n"
+        else if(e=="r") out=out "\r"
+        else if(e=="t") out=out "\t"
+        else if(e=="u") {
+          h=substr(data,pos,4); if(length(h)!=4 || h ~ /[^0-9a-fA-F]/) bad()
+          n=0; for(i=1;i<=4;i++) n=n*16+index("0123456789abcdef",tolower(substr(h,i,1)))-1
+          pos+=4; out=out (n>0 && n<128 ? sprintf("%c",n) : "_")
+        } else bad()
+      }
+      bad()
+    }
+    function semver(v, core,pre,b,n,a,i,p) {
+      sub(/^v/,"",v)
+      if(v=="" || v ~ /[^0-9A-Za-z.+-]/) return ""
+      n=split(v,b,"[+]"); if(n>2) return ""
+      if(n==2 && (b[2]=="" || b[2] ~ /(^\.|\.$|\.\.)/ || b[2] ~ /[^0-9A-Za-z.-]/)) return ""
+      core=b[1]; p=index(core,"-")
+      if(p) {
+        pre=substr(core,p+1); core=substr(core,1,p-1)
+        if(pre=="" || pre ~ /(^\.|\.$|\.\.)/) return ""
+        n=split(pre,a,"."); for(i=1;i<=n;i++) if(a[i] ~ /^[0-9]+$/ && a[i] ~ /^0[0-9]/) return ""
+      }
+      n=split(core,a,"."); if(n!=3) return ""
+      for(i=1;i<=3;i++) if(a[i] !~ /^(0|[1-9][0-9]*)$/) return ""
+      return v
+    }
+    function timestamp(v, y,m,d,days) {
+      if(length(v)!=20 || v !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/) return 0
+      y=substr(v,1,4)+0; m=substr(v,6,2)+0; d=substr(v,9,2)+0
+      if(m<1 || m>12 || d<1 || substr(v,12,2)+0>23 || substr(v,15,2)+0>59 || substr(v,18,2)+0>59) return 0
+      days=31; if(m==4||m==6||m==9||m==11) days=30
+      if(m==2) days=28+(y%4==0 && (y%100!=0 || y%400==0))
+      return d<=days
+    }
+    function object(depth,release, key,tag,draft,published,ts,ds,ps,version) {
+      take("{"); ws()
+      if(substr(data,pos,1)!="}") while(1) {
+        key=str(); take(":"); value(depth+1)
+        if(release && key=="tag_name") { if(ts++ || type!="string") bad(); tag=text }
+        if(release && key=="draft") { if(ds++ || type!="boolean") bad(); draft=text }
+        if(release && key=="published_at") {
+          if(ps++ || (type!="string" && type!="null")) bad()
+          if(type=="string" && !timestamp(text)) bad()
+          published=(type=="string")
+        }
+        ws(); if(substr(data,pos,1)=="}") break
+        take(",")
+      }
+      take("}")
+      if(release) {
+        if(ts!=1 || ds!=1 || ps!=1) bad()
+        version=semver(tag)
+        if(draft=="false" && published && version!="") tags[++eligible]=version
+      }
+      type="object"; text=""
+    }
+    function value(depth, c,rest) {
+      if(depth>64) bad()
+      ws(); c=substr(data,pos,1)
+      if(c=="\"") { text=str(); type="string"; return }
+      if(c=="{") { object(depth,0); return }
+      if(c=="[") {
+        take("["); ws()
+        if(substr(data,pos,1)!="]") while(1) {
+          value(depth+1); ws(); if(substr(data,pos,1)=="]") break; take(",")
+        }
+        take("]"); type="array"; text=""; return
+      }
+      rest=substr(data,pos)
+      if(substr(rest,1,4)=="true") { pos+=4; type="boolean"; text="true"; return }
+      if(substr(rest,1,5)=="false") { pos+=5; type="boolean"; text="false"; return }
+      if(substr(rest,1,4)=="null") { pos+=4; type="null"; text=""; return }
+      if(match(rest,/^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?/)) { pos+=RLENGTH; type="number"; text=""; return }
+      bad()
+    }
+    { data=data $0 "\n" }
+    END {
+      pos=1; take("["); ws()
+      if(substr(data,pos,1)!="]") while(1) {
+        if(++count>100) bad()
+        object(1,1); ws(); if(substr(data,pos,1)=="]") break; take(",")
+      }
+      take("]"); ws(); if(pos<=length(data)) bad()
+      print count+0; for(i=1;i<=eligible;i++) print tags[i]
+    }
+  ' "$1"
+}
+
+release_semver_max() {
+  LC_ALL=C awk '
+    function numeric(a,b) {
+      if(length(a)!=length(b)) return length(a)>length(b)?1:-1
+      if(("x" a)==("x" b)) return 0
+      return ("x" a)>("x" b)?1:-1
+    }
+    function compare(a,b, ac,bc,ap,bp,x,y,i,n,m,c,p) {
+      sub(/[+].*$/,"",a); sub(/[+].*$/,"",b)
+      p=index(a,"-"); ac=p?substr(a,1,p-1):a; ap=p?substr(a,p+1):""
+      p=index(b,"-"); bc=p?substr(b,1,p-1):b; bp=p?substr(b,p+1):""
+      split(ac,x,"."); split(bc,y,".")
+      for(i=1;i<=3;i++) { c=numeric(x[i],y[i]); if(c) return c }
+      if(ap=="" || bp=="") return ap==bp?0:(ap==""?1:-1)
+      n=split(ap,x,"."); m=split(bp,y,".")
+      for(i=1;i<=n && i<=m;i++) {
+        if(("x" x[i])==("x" y[i])) continue
+        if(x[i]~/^[0-9]+$/ && y[i]~/^[0-9]+$/) return numeric(x[i],y[i])
+        if(x[i]~/^[0-9]+$/) return -1
+        if(y[i]~/^[0-9]+$/) return 1
+        return ("x" x[i])>("x" y[i])?1:-1
+      }
+      return n==m?0:(n>m?1:-1)
+    }
+    NF { if(best=="" || compare($0,best)>0) best=$0 }
+    END { if(best=="") exit 1; print best }
+  ' "$1"
+}
+
+release_select_latest() (
+  local root="${1:-${TMPDIR:-/tmp}}" tmp page count
+  tmp="$(mktemp -d "$root/easycard-release.XXXXXX")" || return 1
+  trap 'rm -rf -- "$tmp"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' HUP TERM
+  : > "$tmp/tags"
+  for ((page=1; page<=10; page++)); do
+    release_api_download "https://api.github.com/repos/${REPO}/releases?per_page=100&page=$page" "$tmp/page.json" || { echo "公开版本第 $page 页下载失败" >&2; return 1; }
+    release_parse_page "$tmp/page.json" > "$tmp/parsed" || { echo "公开版本第 $page 页无效" >&2; return 1; }
+    IFS= read -r count < "$tmp/parsed" || return 1
+    tail -n +2 "$tmp/parsed" >> "$tmp/tags" || return 1
+    if (( count < 100 )); then
+      release_semver_max "$tmp/tags" || { echo '没有有效的公开版本' >&2; return 1; }
+      return 0
+    fi
+  done
+  echo '公开版本分页超过安全上限，拒绝使用不完整列表' >&2
+  return 1
+)
+# END EASYCARD RELEASE SELECTION
+
 api_latest_tag() {
-  # GitHub /releases/latest 会排除 prerelease；发布列表第一条才是最近公开发布。
-  # per_page=1 同时避免下载不必要的完整发布历史。
-  local tag
-  tag="$(http_get_stdout "https://api.github.com/repos/${REPO}/releases?per_page=1" \
-    | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-  [[ -n "$tag" ]] || die "无法获取最新公开 Release，请检查网络或仓库 ${REPO}"
-  echo "${tag#v}"
+  release_select_latest || die "无法获取最高公开版本，请检查网络或仓库 ${REPO}"
 }
 
 asset_url() {
@@ -393,7 +585,8 @@ install_manager() {
     if [[ -f "$MANAGER_BIN" ]] && {
       { grep -q '^install_instance()' "$MANAGER_BIN" && ! grep -q '^install_instance()' "$CANDIDATE_MANAGER"; } ||
       { grep -q '^remove_instance()' "$MANAGER_BIN" && ! grep -q '^remove_instance()' "$CANDIDATE_MANAGER"; } ||
-      { grep -q '^update_all_instances()' "$MANAGER_BIN" && ! grep -q '^update_all_instances()' "$CANDIDATE_MANAGER"; }
+      { grep -q '^update_all_instances()' "$MANAGER_BIN" && ! grep -q '^update_all_instances()' "$CANDIDATE_MANAGER"; } ||
+      { grep -q '^release_select_latest()' "$MANAGER_BIN" && ! grep -q '^release_select_latest()' "$CANDIDATE_MANAGER"; }
     }; then
       info '保留已安装的新版管理工具及实例安装/删除/批量更新入口'
     else
