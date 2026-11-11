@@ -19,7 +19,17 @@ Every release includes `SHA256SUMS`. Verify the archive before execution.
 
 The `EasyCard-*` archive names, `ecard8/EasyCard` repository path, and `easycard` service user/directory remain stable compatibility identifiers for the existing release and upgrade chain. User-facing product branding is EasyCard.
 
-> **Release-candidate upgrade deadline:** Each new version provides six calendar months of customer-page access from its release date, clamped to month-end when needed. `v1.1.0-rc.8` is dated `2026-11-11` and remains available through `2027-05-11` in the configured site timezone, requiring an upgrade from `2027-05-12 00:00`. Reinstalling or restarting does not extend the deadline. Administration, `easycard update`, health checks, APIs, and payment callbacks remain available.
+> **Release-candidate upgrade deadline:** Each new version provides six calendar months of customer-page access from its release date, clamped to month-end when needed. `v1.1.0-rc.9` is dated `2026-11-11` and remains available through `2027-05-11` in the configured site timezone, requiring an upgrade from `2027-05-12 00:00`. Reinstalling or restarting does not extend the deadline. Administration, `easycard update`, health checks, APIs, and payment callbacks remain available.
+
+## Email settings (SMTP / Resend)
+
+SMTP remains the default and keeps existing settings. To use Resend, open **System Settings → Email** in each instance, select **Resend**, enter an API key and sender (for example, `EasyCard <noreply@auth.example.com>`), and save. No environment variables or restart are required. The key is encrypted in that instance's database and returned as `********`; blank or unchanged masked input preserves it, while a new value rotates it.
+
+1. Add a sending domain in Resend and complete verification using the exact DNS records shown in its dashboard. Use a sender on that domain and preserve existing inbound MX records. See [Resend official Cloudflare guide](https://resend.com/docs/guides/dns/cloudflare) for domain and DNS steps.
+2. Save the settings, then send a test email from administration to a mailbox you can inspect. A successful request means provider acceptance; check the inbox and spam folder to confirm actual receipt.
+3. Explicitly accept the mail channel in the administration integration acceptance controls before enabling verification or business mail features. Changing the provider, key, or sender requires a new test and acceptance. Configure and accept each instance separately.
+
+Resend verification messages include the site name, code, actual lifetime in minutes, and an ignore-if-unrequested notice. Existing expiry, single-use, and rate-limit rules remain; sending never marks a user's email as verified. SMTP custom templates are preserved. Current live delivery evidence is limited to a Gmail test confirmed by the user, not production domain, DNS, or other mailbox acceptance.
 
 ## Linux installer
 
@@ -82,9 +92,9 @@ Metadata is stored in `/etc/easycard/instances/NAME.conf`. Legacy `/etc/easycard
 
 For first-time use of the new installer, choose a package with the new manager. If neither the candidate nor the installed manager supports instances, installation stops before modifying services. Once installed, the new manager can remain in place when using compatible older application packages.
 
-From rc.8, `sudo easycard update-all [VERSION]` updates every registered instance in name order, stopping immediately on the first failure. Use `sudo easycard update-all 1.1.0-rc.8` to pin the entire batch. The menu adds option **11) Update all instances**, and the multiple-instance selector offers **a**. Without a version, the latest public release is resolved once; the same version and installer are used throughout. The result lists completed, failed, and unprocessed instances. Completed instances stay updated; a failing instance retains the existing updater's rollback behavior. A batch lock prevents overlapping batches, while each update retains the installation lock. Do not combine `update-all` with `--instance`.
+From rc.8, `sudo easycard update-all [VERSION]` updates every registered instance in name order, stopping immediately on the first failure. Use `sudo easycard update-all 1.1.0-rc.9` to pin the entire batch. The menu adds option **11) Update all instances**, and the multiple-instance selector offers **a**. Without a version, the latest public release is resolved once; the same version and installer are used throughout. The result lists completed, failed, and unprocessed instances. Completed instances stay updated; a failing instance retains the existing updater's rollback behavior. A batch lock prevents overlapping batches, while each update retains the installation lock. Do not combine `update-all` with `--instance`.
 
-To bootstrap from rc.7 or earlier, run `sudo easycard instances`, update one actual instance using `sudo easycard --instance NAME update 1.1.0-rc.8`, then run `sudo easycard update-all 1.1.0-rc.8`. The first update installs the shared command; the batch also checks/updates the instance that was already upgraded.
+To bootstrap from rc.7 or earlier, run `sudo easycard instances`, update one actual instance using `sudo easycard --instance NAME update 1.1.0-rc.9`, then run `sudo easycard update-all 1.1.0-rc.9`. The first update installs the shared command; the batch also checks/updates the instance that was already upgraded.
 
 From rc.7, run `sudo easycard remove` to select an instance, or choose it in `sudo easycard` and select **10) Remove the current instance**. The default removes only its service and registration while keeping its directory. You may explicitly choose permanent directory deletion; type the instance name to confirm. Non-interactive examples:
 
