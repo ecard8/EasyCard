@@ -9,6 +9,10 @@ EasyCard 易卡数字平台是一套数字商品智能交易与自动交付平�
 - 官网: [https://www.ecard8.com](https://www.ecard8.com)
 - 发行包: 本仓库 [Releases](https://github.com/ecard8/EasyCard/releases)
 
+## 商品排序与首页购买说明
+
+从 rc.17 起，在“商品管理”列表的“排序”列直接修改数值（越小越靠前，同值按商品 ID）。在“系统设置 → 站点 → 首页购买说明”开关或修改标题、四张卡片的中英文内容、显示顺序和帮助提示，然后保存设置。英文留空使用中文。启用说明时通过“加载更多”按钮翻页，关闭后恢复自动加载。无需数据库迁移或新增环境变量。
+
 ## 支持的平台
 
 | 平台 | 归档文件 |
@@ -24,7 +28,7 @@ EasyCard 易卡数字平台是一套数字商品智能交易与自动交付平�
 
 `EasyCard-*` 归档名、`ecard8/EasyCard` 仓库路径、`easycard` 服务用户/目录是现有发行与升级链路的兼容标识，品牌升级阶段继续保留；产品展示名称统一为 EasyCard。
 
-> **候选版升级期限：**每个新版本从发布日期起提供六个自然月的客户端网页使用期，目标月份无对应日期时取月末。`v1.1.0-rc.16` 发布于 `2026-11-11`，可使用至站点时区 `2027-05-11`；从 `2027-05-12 00:00` 起商城与客户中心要求升级。重新安装或重启不延长期限；管理后台、`easycard update`、健康检查、API 与支付回调继续可用。
+> **候选版升级期限：**每个新版本从发布日期起提供六个自然月的客户端网页使用期，目标月份无对应日期时取月末。`v1.1.0-rc.17` 发布于 `2026-11-12`，可使用至站点时区 `2027-05-12`；从 `2027-05-13 00:00` 起商城与客户中心要求升级。重新安装或重启不延长期限；管理后台、`easycard update`、健康检查、API 与支付回调继续可用。
 
 ---
 
@@ -94,7 +98,7 @@ if [ -f /usr/bin/curl ];then curl -sSO https://raw.githubusercontent.com/ecard8/
 bash install.sh --dir /opt/easycard --port 18765 -y
 ```
 
-需要复现、回滚或受控验收时，可额外使用 `--version 1.1.0-rc.16` 固定版本。
+需要复现、回滚或受控验收时，可额外使用 `--version 1.1.0-rc.17` 固定版本。
 
 安装脚本会:
 
@@ -131,7 +135,7 @@ easycard start
 easycard stop
 easycard restart
 easycard update          # 更新到公开 Release 中语义版本最高的版本
-easycard update 1.1.0-rc.16
+easycard update 1.1.0-rc.17
 easycard port             # 查看当前监听端口
 easycard port 9090        # 安全更换监听端口
 easycard logs 200
@@ -147,20 +151,20 @@ easycard logs -f
 ```bash
 sudo easycard update-all
 # 或为整个批次指定同一版本
-sudo easycard update-all 1.1.0-rc.16
+sudo easycard update-all 1.1.0-rc.17
 ```
 
 菜单入口：`sudo easycard` → **11) 更新所有实例**；多实例选择页也可输入 **a** 直接进入。未指定版本时仅解析一次公开 Release 中语义版本最高的版本，整个批次使用同一目标版本和安装器。显示已完成、失败和未处理实例；成功实例不会自动回退，失败实例沿用单实例更新器的回滚流程。批次互斥锁阻止重复批量执行，每次实例更新仍使用原安装锁。
 
-旧管理器先明确指定 rc.16 更新一套，以安装修正版本选择的共享管理器，再自动更新全部实例：
+旧管理器先明确指定 rc.17 更新一套，以安装修正版本选择的共享管理器，再自动更新全部实例：
 
 ```bash
-sudo easycard update 1.1.0-rc.16
+sudo easycard update 1.1.0-rc.17
 # 多实例时按提示选择一套；也可用 --instance 实际名称 明确指定
 sudo easycard update-all
 ```
 
-新版管理器按语义版本比较候选版与正式版，例如 `1.1.0-rc.16` 高于 `1.1.0-rc.10`，`1.1.0` 高于两者。已支持 `update-all` 的旧管理器（rc.8 起）也可直接运行 `sudo easycard update-all 1.1.0-rc.16`，绕过旧的自动版本选择；rc.7 或更早版本须先更新一套获得批量命令。批次会再次检查/更新已升级实例。`update-all` 不能和 `--instance` 同时使用。
+新版管理器按语义版本比较候选版与正式版，例如 `1.1.0-rc.17` 高于 `1.1.0-rc.10`，`1.1.0` 高于两者。已支持 `update-all` 的旧管理器（rc.8 起）也可直接运行 `sudo easycard update-all 1.1.0-rc.17`，绕过旧的自动版本选择；rc.7 或更早版本须先更新一套获得批量命令。批次会再次检查/更新已升级实例。`update-all` 不能和 `--instance` 同时使用。
 
 只有一个实例时，`easycard`、`easycard restart`、`easycard update` 等原命令保持不变。新增实例后，交互命令先选择实例；脚本、计划任务等非交互调用必须使用 `--instance`（或 `-i`）。`easycard instances` 列出实例名、当前端口和目录。
 
@@ -228,8 +232,8 @@ sudo systemctl daemon-reload
 ## Linux 手动安装
 
 ```bash
-# 以 1.1.0-rc.16 / amd64 为例
-VER=1.1.0-rc.16
+# 以 1.1.0-rc.17 / amd64 为例
+VER=1.1.0-rc.17
 ARCH=amd64   # 或 arm64
 curl -fLO "https://github.com/ecard8/EasyCard/releases/download/v${VER}/EasyCard-${VER}-linux-${ARCH}.tar.gz"
 curl -fLO "https://github.com/ecard8/EasyCard/releases/download/v${VER}/SHA256SUMS"
@@ -390,7 +394,7 @@ shasum -a 256 EasyCard-<版本>-darwin-<架构>.tar.gz
 PowerShell:
 
 ```powershell
-Get-FileHash .\EasyCard-1.1.0-rc.16-windows-amd64.zip -Algorithm SHA256
+Get-FileHash .\EasyCard-1.1.0-rc.17-windows-amd64.zip -Algorithm SHA256
 ```
 
 ---
