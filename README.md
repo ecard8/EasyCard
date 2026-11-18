@@ -9,6 +9,10 @@ EasyCard 易卡数字平台是一套数字商品智能交易与自动交付平�
 - 官网: [https://www.ecard8.com](https://www.ecard8.com)
 - 发行包: 本仓库 [Releases](https://github.com/ecard8/EasyCard/releases)
 
+## rc.19 实时聊天更新
+
+客服咨询与工单使用WebSocket通知变化，后台与客户端取消定时整区刷新。新版提供分栏聊天、固定输入区、草稿保留、历史滚动保持、新消息提示和断线补读。仍仅限登录注册用户，订单售后继续独立。已有Nginx反代请按下方配置转发Upgrade并保留Host端口；无需新增应用端口、数据库迁移或环境变量。
+
 ## 独立客服中心
 
 rc.18 新增仅限已登录注册用户的客服咨询和客服工单，与订单售后完全独立，不关联订单、退款或补发。在“系统设置 → 客服中心”分别开启总开关、咨询和工单；升级后总开关默认关闭。用户从登录后的“客服中心”进入；管理员从“客服咨询”“客服工单”处理。支持公开回复、内部备注、指派、优先级、状态及私有附件。关闭开关保留历史与后台处理。
@@ -34,7 +38,7 @@ rc.18 新增仅限已登录注册用户的客服咨询和客服工单，与订�
 
 `EasyCard-*` 归档名、`ecard8/EasyCard` 仓库路径、`easycard` 服务用户/目录是现有发行与升级链路的兼容标识，品牌升级阶段继续保留；产品展示名称统一为 EasyCard。
 
-> **候选版升级期限：**每个新版本从发布日期起提供六个自然月的客户端网页使用期，目标月份无对应日期时取月末。`v1.1.0-rc.18` 发布于 `2026-11-18`，可使用至站点时区 `2027-05-18`；从 `2027-05-19 00:00` 起商城与客户中心要求升级。重新安装或重启不延长期限；管理后台、`easycard update`、健康检查、API 与支付回调继续可用。
+> **候选版升级期限：**每个新版本从发布日期起提供六个自然月的客户端网页使用期，目标月份无对应日期时取月末。`v1.1.0-rc.19` 发布于 `2026-11-18`，可使用至站点时区 `2027-05-18`；从 `2027-05-19 00:00` 起商城与客户中心要求升级。重新安装或重启不延长期限；管理后台、`easycard update`、健康检查、API 与支付回调继续可用。
 
 ---
 
@@ -104,7 +108,7 @@ if [ -f /usr/bin/curl ];then curl -sSO https://raw.githubusercontent.com/ecard8/
 bash install.sh --dir /opt/easycard --port 18765 -y
 ```
 
-需要复现、回滚或受控验收时，可额外使用 `--version 1.1.0-rc.18` 固定版本。
+需要复现、回滚或受控验收时，可额外使用 `--version 1.1.0-rc.19` 固定版本。
 
 安装脚本会:
 
@@ -141,7 +145,7 @@ easycard start
 easycard stop
 easycard restart
 easycard update          # 更新到公开 Release 中语义版本最高的版本
-easycard update 1.1.0-rc.18
+easycard update 1.1.0-rc.19
 easycard port             # 查看当前监听端口
 easycard port 9090        # 安全更换监听端口
 easycard logs 200
@@ -157,20 +161,20 @@ easycard logs -f
 ```bash
 sudo easycard update-all
 # 或为整个批次指定同一版本
-sudo easycard update-all 1.1.0-rc.18
+sudo easycard update-all 1.1.0-rc.19
 ```
 
 菜单入口：`sudo easycard` → **11) 更新所有实例**；多实例选择页也可输入 **a** 直接进入。未指定版本时仅解析一次公开 Release 中语义版本最高的版本，整个批次使用同一目标版本和安装器。显示已完成、失败和未处理实例；成功实例不会自动回退，失败实例沿用单实例更新器的回滚流程。批次互斥锁阻止重复批量执行，每次实例更新仍使用原安装锁。
 
-旧管理器先明确指定 rc.18 更新一套，以安装修正版本选择的共享管理器，再自动更新全部实例：
+旧管理器先明确指定 rc.19 更新一套，以安装修正版本选择的共享管理器，再自动更新全部实例：
 
 ```bash
-sudo easycard update 1.1.0-rc.18
+sudo easycard update 1.1.0-rc.19
 # 多实例时按提示选择一套；也可用 --instance 实际名称 明确指定
 sudo easycard update-all
 ```
 
-新版管理器按语义版本比较候选版与正式版，例如 `1.1.0-rc.18` 高于 `1.1.0-rc.10`，`1.1.0` 高于两者。已支持 `update-all` 的旧管理器（rc.8 起）也可直接运行 `sudo easycard update-all 1.1.0-rc.18`，绕过旧的自动版本选择；rc.7 或更早版本须先更新一套获得批量命令。批次会再次检查/更新已升级实例。`update-all` 不能和 `--instance` 同时使用。
+新版管理器按语义版本比较候选版与正式版，例如 `1.1.0-rc.19` 高于 `1.1.0-rc.10`，`1.1.0` 高于两者。已支持 `update-all` 的旧管理器（rc.8 起）也可直接运行 `sudo easycard update-all 1.1.0-rc.19`，绕过旧的自动版本选择；rc.7 或更早版本须先更新一套获得批量命令。批次会再次检查/更新已升级实例。`update-all` 不能和 `--instance` 同时使用。
 
 只有一个实例时，`easycard`、`easycard restart`、`easycard update` 等原命令保持不变。新增实例后，交互命令先选择实例；脚本、计划任务等非交互调用必须使用 `--instance`（或 `-i`）。`easycard instances` 列出实例名、当前端口和目录。
 
@@ -238,8 +242,8 @@ sudo systemctl daemon-reload
 ## Linux 手动安装
 
 ```bash
-# 以 1.1.0-rc.18 / amd64 为例
-VER=1.1.0-rc.18
+# 以 1.1.0-rc.19 / amd64 为例
+VER=1.1.0-rc.19
 ARCH=amd64   # 或 arm64
 curl -fLO "https://github.com/ecard8/EasyCard/releases/download/v${VER}/EasyCard-${VER}-linux-${ARCH}.tar.gz"
 curl -fLO "https://github.com/ecard8/EasyCard/releases/download/v${VER}/SHA256SUMS"
@@ -295,12 +299,23 @@ cd /opt/easycard
 
 ### Nginx
 
+客服实时连接使用 `/api/admin/support/events` 和 `/user/support/events`，与网页共用域名和端口。已有反向代理须转发 WebSocket Upgrade；仅更新程序不会修改服务器上的 Nginx 配置。以下 `map` 放在 `http` 上下文，`location` 放在对应站点的 `server` 中。配置方式见 [Nginx 官方 WebSocket 文档](https://nginx.org/en/docs/http/websocket.html)。
+
 整站反代（独立站点推荐）：
 
 ```nginx
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
 location ^~ / {
     proxy_pass http://127.0.0.1:18765;
-    proxy_set_header Host              $host;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_read_timeout 75s;
+    proxy_set_header Host              $http_host;
     proxy_set_header X-Real-IP         $remote_addr;
     proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
@@ -311,24 +326,26 @@ location ^~ / {
 
 若必须保留站点其它静态缓存规则，至少保证下列前缀走反代：
 
+分段代理还须让 `/user/` 走应用；在 `/api/` 和 `/user/` 对应的代理块中加入上面的 `proxy_http_version`、`Upgrade`、`Connection` 与读取超时设置，保留 `Host`。客服显示重连时，可先检查这两个事件请求是否获得 HTTP 101；断线期间仍保留草稿，重连后补读消息。
+
 ```nginx
 location ^~ /admin/ {
     proxy_pass http://127.0.0.1:18765;
-    proxy_set_header Host $host;
+    proxy_set_header Host $http_host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
 }
 location ^~ /api/ {
     proxy_pass http://127.0.0.1:18765;
-    proxy_set_header Host $host;
+    proxy_set_header Host $http_host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
 }
 location ^~ /static/ {
     proxy_pass http://127.0.0.1:18765;
-    proxy_set_header Host $host;
+    proxy_set_header Host $http_host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
@@ -400,7 +417,7 @@ shasum -a 256 EasyCard-<版本>-darwin-<架构>.tar.gz
 PowerShell:
 
 ```powershell
-Get-FileHash .\EasyCard-1.1.0-rc.18-windows-amd64.zip -Algorithm SHA256
+Get-FileHash .\EasyCard-1.1.0-rc.19-windows-amd64.zip -Algorithm SHA256
 ```
 
 ---
